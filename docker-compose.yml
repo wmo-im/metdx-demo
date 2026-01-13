@@ -1,0 +1,92 @@
+###############################################################################
+#
+# Licensed to the Apache Software Foundation (ASF) under one 
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY 
+# KIND, either express or implied.  See the License for the 
+# specific language governing permissions and limitations
+# under the License.
+#
+###############################################################################
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      mode: non-blocking
+      max-buffer-size: 100m
+      max-size: 10m
+      max-file: 1
+
+services:
+
+  metdx-demo-object-storage-server:
+    image: dxflrs/garage:v2.1.0
+    container_name: metdx-demo-object-storage-server
+    restart: unless-stopped
+    env_file:
+      - metdx-demo.env
+    networks:
+      - metdx-demo-net
+    volumes:
+      - ./metdx-demo-object-storage-server/docker/garage.toml:/etc/garage.toml
+      - /tmp/garage/meta:/var/lib/garage/meta
+      - /tmp/garage/data:/var/lib/garage/data
+    <<: *logging
+
+  metdx-demo-object-storage-ui:
+    image: khairul169/garage-webui:latest
+    container_name: metdx-demo-object-storage-ui
+    restart: unless-stopped
+    volumes:
+      - ./metdx-demo-object-storage-server/docker/garage.toml:/etc/garage.toml:ro
+    networks:
+      - metdx-demo-net
+    <<: *logging
+    environment:
+      API_BASE_URL: "http://metdx-demo-object-storage-server:3903"
+      S3_ENDPOINT_URL: "http://metdx-demo-object-storage-server:3900"
+
+  metdx-demo-broker:
+    container_name: metdx-demo-broker
+    restart: always
+    build:
+      context: ./metdx-demo-broker
+    env_file:
+      - metdx-demo.env
+    networks:
+      - metdx-demo-net
+    <<: *logging
+
+  metdx-demo-api:
+    container_name: metdx-demo-api
+    build:
+      context: ./metdx-demo-api
+    volumes:
+      - metdx-demo-api-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/conformance"]
+      interval: 5s
+      retries: 3
+    env_file:
+      - metdx-demo.env
+    restart: unless-stopped
+    networks:
+      - metdx-demo-net
+    <<: *logging
+
+networks:
+  metdx-demo-net:
+
+volumes:
+  metdx-demo-api-data:
