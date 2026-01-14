@@ -25,6 +25,7 @@ def main(page: ft.Page):
     
     # Start at root
     page.go(page.route)
+    page.update()
 
 print("Starting Flet app...")
 
