@@ -22,8 +22,8 @@
 services:
   metdx-demo-broker:
     ports:
-      - 1883:1883  # default
-      - 1884:1884  # websockets
+      - 11883:1883  # default
+      - 11884:1884  # websockets
   metdx-demo-api:
     ports:
       - 8999:80  # default

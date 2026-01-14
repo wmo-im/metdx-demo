@@ -47,4 +47,4 @@ clean:
 rm:
 	docker volume rm $(shell docker volume ls --filter name=${PROJECT_NAME} -q)
 
-.PHONY: build up login down restart reinit-backend force-build logs rm clean
+.PHONY: build up login down restart force-build logs rm clean

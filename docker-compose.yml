@@ -43,6 +43,7 @@ services:
       - /tmp/garage/meta:/var/lib/garage/meta
       - /tmp/garage/data:/var/lib/garage/data
     <<: *logging
+#    entrypoint: ./metdx-demo-object-storage-server/docker/ui-entrypoint.sh
 
   metdx-demo-object-storage-ui:
     image: khairul169/garage-webui:latest
