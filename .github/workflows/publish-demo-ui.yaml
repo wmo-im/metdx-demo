@@ -1,0 +1,40 @@
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v2
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install flet-cli ${{ env.FLET_CLI_VERSION }}
+      run: |
+        python -m pip install --upgrade pip
+        pip install flet-cli==$FLET_CLI_VERSION
+
+    - name: Flet Build Web
+      run: |
+        REPO_NAME=${GITHUB_REPOSITORY#*/}
+        TARGET_PATH="/$REPO_NAME/metdx-demo-ui/"
+        
+        echo "Building for Base URL: $TARGET_PATH"
+        
+        flet build web metdx-demo-ui \
+          --base-url "$TARGET_PATH" \
+          --route-url-strategy hash
+
+    - name: Deploy to Folder on gh-pages
+      uses: JamesIves/github-pages-deploy-action@v4
+      with:
+        branch: gh-pages
+        folder: metdx-demo-ui/build/web
+        target-folder: metdx-demo-ui
+        # clean: true # not sure if this only cleans the target folder
