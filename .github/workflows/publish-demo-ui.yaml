@@ -18,7 +18,7 @@ concurrency:
 env:
   BUILD_NUMBER: 1
   BUILD_VERSION: 1.0.0
-  PYTHON_VERSION: 3.12.8
+  PYTHON_VERSION: 3.14
   FLET_CLI_VERSION: 0.27.5
   PYTHONUTF8: 1
   FLET_CLI_NO_RICH_OUTPUT: 1
@@ -55,8 +55,7 @@ jobs:
         
         flet build web metdx-demo-ui \
           --base-url "$TARGET_PATH" \
-          --route-url-strategy hash \
-          --include-packages flet,requests
+          --route-url-strategy hash
 
     - name: Deploy to Folder on gh-pages
       uses: JamesIves/github-pages-deploy-action@v4

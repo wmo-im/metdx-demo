@@ -1,3 +1,4 @@
 *.bkp
 *.venv
 *.pyc
+*build
