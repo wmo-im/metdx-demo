@@ -55,7 +55,8 @@ jobs:
         
         flet publish metdx-demo-ui \
           --base-url "$TARGET_PATH" \
-          --route-url-strategy hash
+          --route-url-strategy hash \
+          --web-renderer html
 
     - name: Deploy to Folder on gh-pages
       uses: JamesIves/github-pages-deploy-action@v4
