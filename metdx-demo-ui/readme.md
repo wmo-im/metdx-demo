@@ -19,3 +19,4 @@ This UI is based on Flet. Flet is a python-based UI framework which compiles to 
 * github action/pages build
 * inspect collection link in the record view, differentiate EDR/Maps/STAC collections
 * create view page for EDR with different data queries
+* containerise the UI
