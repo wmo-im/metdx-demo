@@ -5,7 +5,7 @@ from dataclasses import field
 import json
 from .record import RecordView
 
-GDC_ENDPOINT = "https://3f76a666fe65.ngrok-free.app/collections/wis2-discovery-metadata/items"
+GDC_ENDPOINT = "https://f0d0ef280f8c.ngrok-free.app/collections/wis2-discovery-metadata/items"
 
 def CatalogueView(page: ft.Page):
 
