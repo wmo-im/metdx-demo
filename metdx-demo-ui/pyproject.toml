@@ -1,0 +1,10 @@
+[project]
+name = "metdx-demo-ui"
+version = "0.1.0"
+description = "Web UI component for the SG-FIT metdx demo"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "flet>=0.80.1",
+    "requests>=2.32.5",
+]
