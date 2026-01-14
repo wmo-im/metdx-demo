@@ -49,7 +49,7 @@ jobs:
     - name: Flet Build Web
       run: |
         REPO_NAME=${GITHUB_REPOSITORY#*/}
-        TARGET_PATH="/$REPO_NAME/"
+        TARGET_PATH="/$REPO_NAME/metdx-demo-ui"
         
         echo "Building for Base URL: $TARGET_PATH"
         
