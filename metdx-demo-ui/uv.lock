@@ -170,14 +170,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/fb/df/d2023c6cef1fb075c27f22c020309f22a7758104af03ec13407f9fe3e0db/flet-0.80.2-py3-none-any.whl", hash = "sha256:74bc54fb5fbf5c2fbfe11da2311a34dddc982b3351500bb56541703d4d474849", size = 440700, upload-time = "2026-01-14T19:03:57.263Z" },
 ]
 
-[package.optional-dependencies]
-cli = [
-    { name = "flet-cli" },
-]
-web = [
-    { name = "flet-web" },
-]
-
 [[package]]
 name = "flet-cli"
 version = "0.80.2"
@@ -337,13 +329,17 @@ name = "metdx-demo-ui"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "flet", extra = ["cli", "web"] },
+    { name = "flet" },
+    { name = "flet-cli" },
+    { name = "flet-web" },
     { name = "requests" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "flet", extras = ["web", "cli"], specifier = "==0.80.2" },
+    { name = "flet", specifier = "==0.80.2" },
+    { name = "flet-cli", specifier = "==0.80.2" },
+    { name = "flet-web", specifier = "==0.80.2" },
     { name = "requests", specifier = ">=2.32.5" },
 ]
 
