@@ -27,6 +27,7 @@ ENV PYGEOAPI_CONFIG=/pygeoapi/local.config.yml
 ENV PYGEOAPI_OPENAPI=/pygeoapi/local.openapi.yml
 
 COPY ./docker/metdx-demo-api.config.yml /pygeoapi/local.config.yml
+COPY ./plugins/processes/chart_generator.py /pygeoapi/pygeoapi/process/chart_generator.py
 
 RUN apt-get update && \
     apt-get install -y curl && \

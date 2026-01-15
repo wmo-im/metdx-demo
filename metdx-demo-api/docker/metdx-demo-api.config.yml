@@ -62,3 +62,7 @@ resources:
         type: process
         processor:
             name: HelloWorld
+    ChartProcessor:
+        type: process
+        processor:
+            name: chart_generator
