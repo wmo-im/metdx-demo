@@ -55,7 +55,7 @@ jobs:
           --base-url metdx-demo-ui \
           --route-url-strategy hash \
           --yes
-        rm -rf build/web/assets/app.zip
+        rm -rf build/web/assets/app/app.zip
 
     - name: Deploy to Folder on gh-pages
       uses: JamesIves/github-pages-deploy-action@v4
