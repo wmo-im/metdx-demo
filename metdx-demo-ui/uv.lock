@@ -171,9 +171,10 @@ wheels = [
 ]
 
 [package.optional-dependencies]
-all = [
+cli = [
     { name = "flet-cli" },
-    { name = "flet-desktop" },
+]
+web = [
     { name = "flet-web" },
 ]
 
@@ -191,25 +192,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/51/d3/b233e1737b7b88300fcc17819394819fac592c8a78ad4a26aff6d591b021/flet_cli-0.80.2.tar.gz", hash = "sha256:3358b3ed7d4fe6f18c7dbf2b0326dc4b8944bbf7d395f673c39a9234fba4b916", size = 44493, upload-time = "2026-01-14T19:04:00.084Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/cc/31/560e1120a4cce98585964ae06300ebfea3b6eedd27d1c04d08883ad6b60d/flet_cli-0.80.2-py3-none-any.whl", hash = "sha256:a3fab5d0d4f426ff8e6ad6f0546af0b98be7b399d612077e591cf4da89ad5c6b", size = 56694, upload-time = "2026-01-14T19:03:59.112Z" },
-]
-
-[[package]]
-name = "flet-desktop"
-version = "0.80.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "flet" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/5f/16/0712b9e03dac24d3b9b91b22f70c1eec0744521842361e3f8801aa801d4a/flet_desktop-0.80.2.tar.gz", hash = "sha256:8b17523282b36393a3ff1e468db3c7d8a3d96ddec85f95fb5d73e50142cd3d62", size = 3271, upload-time = "2026-01-14T19:04:10.795Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b5/0c/6dae175bf1c19068e68e5efbe9f8e4d0317cd1d19e7ceebb5cb904214ecf/flet_desktop-0.80.2-py3-none-macosx_10_14_x86_64.whl", hash = "sha256:1114cd1168bb18a3e92e329256fcce7e4a2e0e6f0e0e07c062ab5804821d3550", size = 48257686, upload-time = "2026-01-14T19:04:22.732Z" },
-    { url = "https://files.pythonhosted.org/packages/05/f9/9ac78ec390725da223b13f8f82d2029aa6e7818781359e9a291c167e0a96/flet_desktop-0.80.2-py3-none-macosx_12_0_arm64.whl", hash = "sha256:5fb8b8e85a3bbc2326c35d39878068478fb7e16e69bc2f185ef8dbbcd7ec61b7", size = 48257684, upload-time = "2026-01-14T19:04:03.476Z" },
-    { url = "https://files.pythonhosted.org/packages/46/34/626601cd51a9824878a51f7b9de1529c7fb718d0902441d1771875f6fdbf/flet_desktop-0.80.2-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:23a78c31c26567c206e1bc94a8318166f0b3645c3f58854b5fbd0111fb345b34", size = 21681406, upload-time = "2026-01-14T19:04:06.452Z" },
-    { url = "https://files.pythonhosted.org/packages/0c/4b/701290290e2561d3dc1296e4b77eb6cb5c23dcb043dafa15c6b120b5253d/flet_desktop-0.80.2-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:f4acdd617c6c04998e71691696757bdf0b9c8fcd6e63616e7de1d278937f035b", size = 22067842, upload-time = "2026-01-14T19:04:25.438Z" },
-    { url = "https://files.pythonhosted.org/packages/4f/53/8bb20a969060dcdf1a6c53afb4769b2b623afabb083611350562c546722b/flet_desktop-0.80.2-py3-none-musllinux_1_2_aarch64.whl", hash = "sha256:14c3b325e1b87d35ecf5120ccdd4c66d07bdd24e577b37362be0d61bef025d35", size = 21681396, upload-time = "2026-01-14T19:04:09.119Z" },
-    { url = "https://files.pythonhosted.org/packages/f9/50/cb7bab718a22fee595924b83a91c75d925b3b3c4242515d5b476521b127c/flet_desktop-0.80.2-py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:1a9b3a503bb4b67f3c60f75cc5d6ee1bdd8254ad048bce9a4adbd6506ca1311d", size = 22067835, upload-time = "2026-01-14T19:04:12.16Z" },
-    { url = "https://files.pythonhosted.org/packages/c5/92/fb7e97dc179b871221e2dc848c8d65ac69281c61ab03249368c65d26257d/flet_desktop-0.80.2-py3-none-win32.whl", hash = "sha256:aaeab345e3fa623fead9a0148ddb64b9316ea1555fd63de80e54817036e070eb", size = 38095076, upload-time = "2026-01-14T19:04:15.539Z" },
-    { url = "https://files.pythonhosted.org/packages/21/7b/c6b7a9cee63aabed49b3bdafba2f712a4d33cc039cf7d868bb36460bbad5/flet_desktop-0.80.2-py3-none-win_amd64.whl", hash = "sha256:dfb3d77e7d356a0fd6f84dc6e126a87e84cd9d52d4988616089af73b26f6ccab", size = 38095080, upload-time = "2026-01-14T19:04:18.982Z" },
 ]
 
 [[package]]
@@ -355,13 +337,13 @@ name = "metdx-demo-ui"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "flet", extra = ["all"] },
+    { name = "flet", extra = ["cli", "web"] },
     { name = "requests" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "flet", extras = ["all"], specifier = "==0.80.1" },
+    { name = "flet", extras = ["web", "cli"], specifier = "==0.80.1" },
     { name = "requests", specifier = ">=2.32.5" },
 ]
 
