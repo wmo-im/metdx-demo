@@ -332,7 +332,6 @@ dependencies = [
     { name = "flet" },
     { name = "flet-cli" },
     { name = "flet-web" },
-    { name = "requests" },
 ]
 
 [package.metadata]
@@ -340,7 +339,6 @@ requires-dist = [
     { name = "flet", specifier = "==0.80.2" },
     { name = "flet-cli", specifier = "==0.80.2" },
     { name = "flet-web", specifier = "==0.80.2" },
-    { name = "requests", specifier = ">=2.32.5" },
 ]
 
 [[package]]
