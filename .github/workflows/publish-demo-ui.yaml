@@ -12,14 +12,18 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  PYTHON_VERSION: 3.14.2  
-  FLET_CLI_NO_RICH_OUTPUT: 1
+  PYTHON_VERSION: 3.14.2
   UV_NO_PROGRESS: 1
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
+    
+    # Global default: all 'run' steps execute inside this folder
+    defaults:
+      run:
+        working-directory: ./metdx-web-ui
     
     permissions:
       contents: write
@@ -33,7 +37,7 @@ jobs:
       with:
         python-version: ${{ env.PYTHON_VERSION }}
         enable-cache: true
-        cache-dependency-glob: "uv.lock"
+        cache-dependency-glob: "metdx-web-ui/uv.lock"
 
     - name: Install System Dependencies
       run: |
@@ -47,10 +51,7 @@ jobs:
       run: |
         REPO_NAME=${GITHUB_REPOSITORY#*/}
         TARGET_PATH="/$REPO_NAME/metdx-demo-ui"
-        
         echo "Building for Base URL: $TARGET_PATH"
-        
-        # 'uv run' executes the command within the project's virtual environment
         uv run flet build web metdx-demo-ui \
           --base-url "$TARGET_PATH" \
           --route-url-strategy hash \
@@ -60,6 +61,6 @@ jobs:
       uses: JamesIves/github-pages-deploy-action@v4
       with:
         branch: gh-pages
-        folder: metdx-demo-ui/build/web
+        folder: metdx-web-ui/build/web
         target-folder: metdx-demo-ui
         clean: true
