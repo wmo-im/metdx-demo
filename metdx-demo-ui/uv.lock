@@ -361,7 +361,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "flet", extras = ["all"], specifier = ">=0.80.2" },
+    { name = "flet", extras = ["all"], specifier = ">=0.80.1" },
     { name = "requests", specifier = ">=2.32.5" },
 ]
 
