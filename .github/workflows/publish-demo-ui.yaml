@@ -51,11 +51,12 @@ jobs:
         REPO_NAME=${GITHUB_REPOSITORY#*/}
         TARGET_PATH="/$REPO_NAME/metdx-demo-ui"
         echo "Building for Base URL: $TARGET_PATH"
-        uv run flet build web . \
+        uv run flet build web src \
           --base-url metdx-demo/metdx-demo-ui \
           --route-url-strategy hash \
+          --cleanup-packages \
+          --cleanup-app \
           --yes
-        rm -rf build/web/assets/app/app.zip
 
     - name: Deploy to Folder on gh-pages
       uses: JamesIves/github-pages-deploy-action@v4
