@@ -23,7 +23,7 @@ jobs:
     # Global default: all 'run' steps execute inside this folder
     defaults:
       run:
-        working-directory: ./metdx-web-ui
+        working-directory: ./metdx-demo-ui
     
     permissions:
       contents: write
@@ -37,7 +37,7 @@ jobs:
       with:
         python-version: ${{ env.PYTHON_VERSION }}
         enable-cache: true
-        cache-dependency-glob: "metdx-web-ui/uv.lock"
+        cache-dependency-glob: "metdx-demo-ui/uv.lock"
 
     - name: Install System Dependencies
       run: |
@@ -61,6 +61,6 @@ jobs:
       uses: JamesIves/github-pages-deploy-action@v4
       with:
         branch: gh-pages
-        folder: metdx-web-ui/build/web
+        folder: metdx-demo-ui/build/web
         target-folder: metdx-demo-ui
         clean: true
