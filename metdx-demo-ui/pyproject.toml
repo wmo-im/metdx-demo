@@ -5,9 +5,7 @@ description = "Web UI component for the SG-FIT metdx demo"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    # "flet[cli]==0.80.1",
-    # "flet-cli==0.80.2",
-    # "requests>=2.32.5",
+    "requests>=2.32.5",
 ]
 
 [dependency-groups]
