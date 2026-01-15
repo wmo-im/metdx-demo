@@ -20,7 +20,6 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     
-    # Global default: all 'run' steps execute inside this folder
     defaults:
       run:
         working-directory: ./metdx-demo-ui
@@ -52,8 +51,8 @@ jobs:
         REPO_NAME=${GITHUB_REPOSITORY#*/}
         TARGET_PATH="/$REPO_NAME/metdx-demo-ui"
         echo "Building for Base URL: $TARGET_PATH"
-        uv run flet build web metdx-demo-ui \
-          --base-url "$TARGET_PATH" \
+        uv run flet build web . \
+          --base-url metdx-demo-ui \
           --route-url-strategy hash \
           --yes
 
