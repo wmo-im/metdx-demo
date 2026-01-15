@@ -52,7 +52,7 @@ jobs:
         TARGET_PATH="/$REPO_NAME/metdx-demo-ui"
         echo "Building for Base URL: $TARGET_PATH"
         uv run flet build web . \
-          --base-url metdx-demo-ui \
+          --base-url metdx-demo/metdx-demo-ui \
           --route-url-strategy hash \
           --yes
         rm -rf build/web/assets/app/app.zip
