@@ -54,8 +54,6 @@ jobs:
         uv run flet build web src \
           --base-url metdx-demo/metdx-demo-ui \
           --route-url-strategy hash \
-          --cleanup-packages \
-          --cleanup-app \
           --yes
 
     - name: Deploy to Folder on gh-pages
