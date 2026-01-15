@@ -21,21 +21,21 @@
 
 from pygeoapi.process.base import BaseProcessor, ProcessorExecuteError
 
+from datetime import datetime
 import io
+
 import matplotlib
+import matplotlib.pyplot as plt
+from pygeoapi.process.base import BaseProcessor, ProcessorExecuteError
 
 matplotlib.use("Agg")
-
-import matplotlib.pyplot as plt
-from pygeoapi.process.base import ProcessorExecuteError
-from datetime import datetime
 
 PROCESS_METADATA = {
     "version": "0.2.0",
     "id": "ChartProcessor",
     "title": {"en": "ChartProcessor"},
     "description": {
-        "en": "An example process that takes a coverageJSON PointSeries as input, "
+        "en": "An example process that takes a coverageJSON PointSeries as input, "  # noqa
         "and returns a timeseries chart. ",
     },
     "jobControlOptions": ["sync-execute", "async-execute"],
@@ -53,7 +53,10 @@ PROCESS_METADATA = {
         "coveragejson": {
             "title": "CoverageJSON",
             "description": "Input CoverageJSON object",
-            "schema": {"type": "object", "contentMediaType": "application/json"},
+            "schema": {
+                "type": "object",
+                "contentMediaType": "application/json",
+            },  # noqa
             "minOccurs": 1,
             "maxOccurs": 1,
         }
@@ -67,7 +70,7 @@ PROCESS_METADATA = {
     "example": {
         "inputs": {
             "name": "PointSeries CoverageJSON",
-            "message": "PointSeries CoverageJSON.",
+            "CoverageJSON": "PointSeries CoverageJSON.",
         }
     },
 }
@@ -82,14 +85,14 @@ class ChartProcessor(BaseProcessor):
 
         :param processor_def: provider definition
 
-        :returns: pygeoapi.process.mycoolsqrtprocess.MyCoolSqrtProcessor
+        :returns: pygeoapi.process.chart_generator.ChartProcessor
         """
 
         super().__init__(processor_def, PROCESS_METADATA)
 
     def execute(self, data, outputs=None):
 
-        cov = data.get("coveragejson")
+        cov = data.get("CoverageJSON")
         if cov is None:
             raise ProcessorExecuteError("coveragejson input is required")
 
@@ -104,7 +107,8 @@ class ChartProcessor(BaseProcessor):
             values = range_obj["values"]
 
         except Exception as err:
-            raise ProcessorExecuteError(f"Invalid CoverageJSON structure: {err}")
+            msg = f"Invalid CoverageJSON structure: {err}"
+            raise ProcessorExecuteError(msg)
 
         # --- Convert ISO8601 times to datetime ---
         x = [datetime.fromisoformat(t.replace("Z", "+00:00")) for t in times]

@@ -65,4 +65,4 @@ resources:
     ChartProcessor:
         type: process
         processor:
-            name: chart_generator
+            name: pygeoapi.process.chart_generator.ChartProcessor
