@@ -19,7 +19,7 @@ env:
   BUILD_NUMBER: 1
   BUILD_VERSION: 1.0.0
   PYTHON_VERSION: 3.14.2
-  FLET_CLI_VERSION: 0.27.5
+  FLET_CLI_VERSION: 0.80.2
   PYTHONUTF8: 1
   FLET_CLI_NO_RICH_OUTPUT: 1
   UV_NO_PROGRESS: 1
@@ -53,15 +53,14 @@ jobs:
         
         echo "Building for Base URL: $TARGET_PATH"
         
-        flet publish metdx-demo-ui \
+        flet build web metdx-demo-ui \
           --base-url "$TARGET_PATH" \
-          --route-url-strategy hash \
-          --web-renderer html
+          --route-url-strategy hash
 
     - name: Deploy to Folder on gh-pages
       uses: JamesIves/github-pages-deploy-action@v4
       with:
         branch: gh-pages
-        folder: metdx-demo-ui/dist
+        folder: metdx-demo-ui/build/web
         target-folder: metdx-demo-ui
         # clean: true # not sure if this only cleans the target folder
