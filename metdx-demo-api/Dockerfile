@@ -30,7 +30,8 @@ COPY ./docker/metdx-demo-api.config.yml /pygeoapi/local.config.yml
 COPY ./plugins/processes/chart_generator.py /pygeoapi/pygeoapi/process/chart_generator.py
 
 RUN apt-get update && \
-    apt-get install -y curl python3-matplotlib && \
+    apt-get install -y python3-matplotlib && \
+    /venv/bin/pip3 install kerchunk cfgrib && \
     chgrp -R 0 /pygeoapi && \
     chmod -R g=u /pygeoapi
 
