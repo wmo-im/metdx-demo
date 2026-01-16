@@ -1,0 +1,6 @@
+kerchunk
+beautifulsoup4
+s3fs
+fsspec
+cfgrib 
+xarray
