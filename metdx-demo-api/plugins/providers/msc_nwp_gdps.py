@@ -52,6 +52,9 @@ class MSCNWPGDPSEDRProvider(XarrayEDRProvider):
     def get_instances(self):
         return ['20251028T00Z']
 
+    def get_instance(self, instance_id):
+        return True
+
     def position(self, **kwargs):
         return super().position(**kwargs)
 
@@ -72,13 +75,26 @@ class MSCNWPGDPSMapProvider(BaseProvider):
         if self.squeeze:
             self.data = self.data.squeeze()
 
+        self._fields = self.get_fields()
+
     def get_fields(self):
-        self._fields = {}
-        for v in list(self.data.variables.keys()):
-            if 'standard_name' in self.data.variables[v].attrs:
-                self._fields[self.data.variables[v].attrs['standard_name']] = {
-                    'type': str(self.data.variables[v].dtype)
-                }
+        if not self._fields:
+            for key, value in self.data.variables.items():
+                if key not in self.data.coords:
+                    LOGGER.debug('Adding variable')
+                    dtype = value.dtype
+                    if dtype.name.startswith('float'):
+                        dtype = 'float'
+                    elif dtype.name.startswith('int'):
+                        dtype = 'integer'
+                    elif dtype.name.startswith('str'):
+                        dtype = 'string'
+
+                    self._fields[key] = {
+                        'type': dtype,
+                        'title': value.attrs.get('long_name'),
+                        'x-ogc-unit': value.attrs.get('units')
+                    }
 
         return self._fields
 
@@ -115,7 +131,7 @@ class MSCNWPGDPSMapProvider(BaseProvider):
 
         valid_time_values = [str(t)[:16] for t in self.data[self.time_field].values]  # noqa
         if query_params[self.time_field][:16] not in valid_time_values:
-            msg = f'Invalid datetime value {query_params[self.time_field]}; valid values are {valid_time_values}'  # noqa
+            msg = f'Invalid datetime; valid values are {valid_time_values}'
             raise ProviderInvalidDataError(user_msg=msg)
 
         LOGGER.debug('Processing z field')
@@ -129,7 +145,7 @@ class MSCNWPGDPSMapProvider(BaseProvider):
             query_params[self.z_field] = 0
 
         if query_params[self.z_field] not in self.data[self.z_field].values:
-            msg = f'Invalid z value; valid values are {self.data[self.z_field].values}'  # noqa
+            msg = f'Invalid z; valid values are {self.data[self.z_field].values}'  # noqa
             raise ProviderInvalidDataError(user_msg=msg)
 
         LOGGER.debug(f'Query params: {query_params}')

@@ -19,8 +19,6 @@
 #
 ###############################################################################
 
-from pygeoapi.process.base import BaseProcessor, ProcessorExecuteError
-
 from datetime import datetime
 import io
 
