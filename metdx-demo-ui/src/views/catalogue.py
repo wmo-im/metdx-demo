@@ -1,6 +1,6 @@
 import flet as ft
 from flet import Checkbox, FloatingActionButton, Icons, Page, TextField, ListView
-from pyodide.http import pyfetch
+import requests
 from dataclasses import field
 import json
 from .record import RecordView
@@ -70,15 +70,13 @@ def CatalogueView(page: ft.Page):
 
             self.content = ft.Column(controls=[title_control, desc_control, tags_row])
 
-    async def on_search(e):
+    def on_search(e):
         try:
-            url = f"{GDC_ENDPOINT}?q={search_bar.value}"
-            response = await pyfetch(url, method="GET")
-            data = await response.json()
-
+            resp = requests.get(GDC_ENDPOINT, params={"q": search_bar.value})
+            resp.raise_for_status()
+            data = resp.json()
             number_of_results = data.get("numberMatched", 0)
             results = data.get("features", [])
-
             search_results.controls.clear()
             search_results.controls.append(
                 ft.Text(
@@ -86,10 +84,8 @@ def CatalogueView(page: ft.Page):
                     weight=ft.FontWeight.BOLD,
                 )
             )
-
             for item in results:
                 search_results.controls.append(SearchResult(record=item))
-
             search_results.visible = True
             page.update()
 

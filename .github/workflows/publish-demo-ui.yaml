@@ -19,47 +19,47 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
-    
+
     defaults:
       run:
         working-directory: ./metdx-demo-ui
-    
+
     permissions:
       contents: write
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Install uv
-      uses: astral-sh/setup-uv@v5
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-        enable-cache: true
-        cache-dependency-glob: "metdx-demo-ui/uv.lock"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: "metdx-demo-ui/uv.lock"
 
-    - name: Install System Dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libgtk-3-dev
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev
 
-    - name: Install Project Dependencies
-      run: uv sync --frozen
+      - name: Install Project Dependencies
+        run: uv sync --frozen
 
-    - name: Flet Build Web
-      run: |
-        REPO_NAME=${GITHUB_REPOSITORY#*/}
-        TARGET_PATH="/$REPO_NAME/metdx-demo-ui"
-        echo "Building for Base URL: $TARGET_PATH"
-        uv run flet build web src \
-          --base-url metdx-demo/metdx-demo-ui \
-          --route-url-strategy hash \
-          --yes
+      - name: Flet Build Web
+        run: |
+          REPO_NAME=${GITHUB_REPOSITORY#*/}
+          TARGET_PATH="/$REPO_NAME/metdx-demo-ui"
+          echo "Building for Base URL: $TARGET_PATH"
+          uv run flet build web . \
+            --base-url metdx-demo/metdx-demo-ui \
+            --route-url-strategy hash \
+            --yes
 
-    - name: Deploy to Folder on gh-pages
-      uses: JamesIves/github-pages-deploy-action@v4
-      with:
-        branch: gh-pages
-        folder: metdx-demo-ui/src/build/web
-        target-folder: metdx-demo-ui
-        clean: true
+      - name: Deploy to Folder on gh-pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: gh-pages
+          folder: metdx-demo-ui/src/build/web
+          target-folder: metdx-demo-ui
+          clean: true
