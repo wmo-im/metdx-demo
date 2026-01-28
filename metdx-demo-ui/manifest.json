@@ -1,6 +1,6 @@
 {
-    "name": "metdx-demo-ui",
-    "short_name": "metdx_demo_ui",
+    "name": "src",
+    "short_name": "src",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#FFFFFF",
