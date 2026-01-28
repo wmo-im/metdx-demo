@@ -12,3 +12,6 @@ dependencies = [
 dev = [
     "flet[all]>=0.80.2",
 ]
+
+[tool.flet.app]
+path = "src"
