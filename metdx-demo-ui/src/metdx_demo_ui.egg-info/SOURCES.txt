@@ -1,0 +1,11 @@
+README.md
+pyproject.toml
+src/main.py
+src/metdx_demo_ui.egg-info/PKG-INFO
+src/metdx_demo_ui.egg-info/SOURCES.txt
+src/metdx_demo_ui.egg-info/dependency_links.txt
+src/metdx_demo_ui.egg-info/requires.txt
+src/metdx_demo_ui.egg-info/top_level.txt
+src/views/__init__.py
+src/views/catalogue.py
+src/views/record.py

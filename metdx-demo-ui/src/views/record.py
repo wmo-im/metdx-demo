@@ -133,16 +133,11 @@ def RecordView(page: ft.Page, record: dict):
     )
 
     async def check_endpoints(e):
-        print(f"[record] check_endpoints called, collection_url={collection_url}")
         if not collection_url:
-            print("[record] no collection_url, returning")
             return
         try:
-            print(f"[record] fetching {collection_url}")
             data = await _fetch_json(collection_url)
-            print(f"[record] fetch done, keys={list(data.keys())}")
         except Exception as ex:
-            print(f"[record] fetch failed: {ex}")
             edr_btn.tooltip = "Could not reach collection endpoint"
             map_btn.tooltip = "Could not reach collection endpoint"
             page.update()
@@ -152,7 +147,6 @@ def RecordView(page: ft.Page, record: dict):
         edr_url = None
         if data.get("data_queries"):
             edr_url = collection_url
-        print(f"[record] edr_url={edr_url}")
 
         # OGC Maps: link with rel == OGC map relation
         map_url = None
@@ -161,7 +155,6 @@ def RecordView(page: ft.Page, record: dict):
             if lnk.get("rel") == OGC_MAP_REL:
                 map_url = lnk.get("href")
                 break
-        print(f"[record] map_url={map_url}")
 
         if edr_url:
             edr_btn.bgcolor = EDR_COLOR_ACTIVE
@@ -169,7 +162,6 @@ def RecordView(page: ft.Page, record: dict):
             edr_btn.tooltip = "Query this EDR collection on a map"
 
             async def open_edr_map(e, url=edr_url, t=title):
-                print(f"[record] opening EDR map for {url}")
                 map_view, load_metadata = EDRMapView(page, url, t)
                 page.views.append(map_view)
                 page.update()
@@ -187,9 +179,7 @@ def RecordView(page: ft.Page, record: dict):
         else:
             map_btn.tooltip = "OGC Maps not available for this collection"
 
-        print("[record] calling page.update() after button state update")
         page.update()
-        print("[record] check_endpoints complete")
 
     view = ft.View(
         route=f"/{rec_id}",
