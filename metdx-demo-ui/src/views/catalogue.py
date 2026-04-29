@@ -1,8 +1,14 @@
 import flet as ft
-from flet import Checkbox, FloatingActionButton, Icons, Page, TextField, ListView
-from pyodide.http import pyfetch
+from flet import Page, TextField, ListView
+try:
+    from pyodide.http import pyfetch as _pyfetch
+    _is_pyodide = True
+except ModuleNotFoundError:
+    import httpx
+    _is_pyodide = False
 from dataclasses import field
 import json
+import os
 from .record import RecordView
 
 # GDC_ENDPOINT = "https://f0d0ef280f8c.ngrok-free.app/collections/wis2-discovery-metadata/items"
@@ -11,14 +17,19 @@ GDC_ENDPOINT = (
 )
 
 
-def CatalogueView(page: ft.Page):
+def CatalogueView(page: ft.Page, local_fixture: str | None = None):
 
     page.theme_mode = ft.ThemeMode.LIGHT
-    page.update()
 
-    def on_click_record(e, record):
-        record_view = RecordView(page, record)
+    async def on_click_record(e, record):
+        print(f"[catalogue] on_click_record: {record.get('id')}")
+        record_view, check_endpoints = RecordView(page, record)
+        print(f"[catalogue] RecordView built, appending to page.views (currently {len(page.views)})")
         page.views.append(record_view)
+        page.update()
+        print("[catalogue] page.update() called, now calling check_endpoints")
+        await check_endpoints(None)
+        print("[catalogue] check_endpoints done")
 
     @ft.control
     class SearchResult(ft.Container):
@@ -33,7 +44,7 @@ def CatalogueView(page: ft.Page):
 
             self.padding = 10
             self.border_radius = 5
-            self.border = ft.border.all(1, ft.Colors.GREY)
+            self.border = ft.Border.all(1, ft.Colors.GREY)
             self.bgcolor = ft.Colors.GREY_50
 
             # Title
@@ -61,20 +72,39 @@ def CatalogueView(page: ft.Page):
                     ft.Container(
                         content=ft.Text(tag, size=10, color=ft.Colors.WHITE),
                         bgcolor=ft.Colors.BLUE_GREY_600,
-                        padding=ft.padding.symmetric(horizontal=8, vertical=2),
+                        padding=ft.Padding.symmetric(horizontal=8, vertical=2),
                         border_radius=10,
                     )
                 )
 
-            self.on_click = lambda e: on_click_record(e, self.record)
+            async def _on_click(e, r=self.record):
+                await on_click_record(e, r)
+            self.on_click = _on_click
 
             self.content = ft.Column(controls=[title_control, desc_control, tags_row])
 
     async def on_search(e):
         try:
-            url = f"{GDC_ENDPOINT}?q={search_bar.value}"
-            response = await pyfetch(url, method="GET")
-            data = await response.json()
+            if local_fixture:
+                # Load from local JSON file — search is client-side substring match
+                with open(local_fixture, "r") as f:
+                    data = json.load(f)
+                q = (search_bar.value or "").lower()
+                if q:
+                    data["features"] = [
+                        feat for feat in data.get("features", [])
+                        if q in json.dumps(feat).lower()
+                    ]
+                    data["numberMatched"] = len(data["features"])
+            else:
+                url = f"{GDC_ENDPOINT}?q={search_bar.value}"
+                if _is_pyodide:
+                    response = await _pyfetch(url, method="GET")
+                    data = await response.json()
+                else:
+                    async with httpx.AsyncClient() as client:
+                        response = await client.get(url)
+                    data = response.json()
 
             number_of_results = data.get("numberMatched", 0)
             results = data.get("features", [])

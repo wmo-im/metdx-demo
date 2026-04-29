@@ -1,32 +1,54 @@
 import flet as ft
+import os
+import sys
+import traceback
 from views.catalogue import CatalogueView
-# from views.record import DetailView
 
-def main(page: ft.Page):
-    page.title = "WIS2 Catalogue"
+_LOG = open("/tmp/metdx_debug.log", "w", buffering=1)
+def log(msg):
+    _LOG.write(msg + "\n")
+    _LOG.flush()
+    print(msg, flush=True)
 
-    def route_change(route):
-        page.views.clear()
-        page.views.append(CatalogueView(page))
-        print(f"Navigated to {page.route}")
-        # if page.route == "/details":
-        #     page.views.append(DetailView(page))
-        
+log("module loaded")
+
+# Set METDX_TEST=1 to load the local polytope fixture
+# instead of hitting the live WIS2 GDC endpoint.
+# e.g.  METDX_TEST=1 flet run ./main.py
+TEST_MODE = os.environ.get("METDX_TEST") == "1"
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+FIXTURE_PATH = os.path.join(_HERE, "data", "polytope_items.json")
+
+
+async def main(page: ft.Page):
+    try:
+        log("[main] main() called")
+        page.title = "WIS2 Catalogue"
+
+        fixture = FIXTURE_PATH if TEST_MODE else None
+
+        async def view_pop(view):
+            log(f"[main] view_pop, views: {len(page.views)}")
+            page.views.pop()
+            page.update()
+
+        page.on_view_pop = view_pop
+
+        log("[main] building CatalogueView")
+        catalogue = CatalogueView(page, local_fixture=fixture)
+        log(f"[main] CatalogueView built: {catalogue}")
+        page.views.append(catalogue)
+        log(f"[main] calling page.update(), views={len(page.views)}")
         page.update()
+        log("[main] done")
+    except Exception as ex:
+        log(f"[main] ERROR: {ex}")
+        log(traceback.format_exc())
 
-    def view_pop(view):
-        page.views.pop()
-        top_view = page.views[-1]
-        page.go(top_view.route)
 
-    page.views.append(CatalogueView(page))
-    page.on_route_change = route_change
-    page.on_view_pop = view_pop
-    
-    # Start at root
-    page.go(page.route)
-    page.update()
-
-print("Starting Flet app...")
+log("Starting Flet app...")
+if TEST_MODE:
+    log(f"TEST MODE: loading local fixture {FIXTURE_PATH}")
 
 ft.run(main)

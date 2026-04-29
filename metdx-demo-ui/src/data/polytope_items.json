@@ -1,0 +1,115 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "id": "urn:dte:polytope:operational-data",
+      "conformsTo": [
+        "http://wis.wmo.int/spec/wcmp/2/conf/core"
+      ],
+      "type": "Feature",
+      "time": {
+        "interval": [
+          "2025-12-01",
+          ".."
+        ],
+        "resolution": "PT6H"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-180, -90],
+            [ 180, -90],
+            [ 180,  90],
+            [-180,  90],
+            [-180, -90]
+          ]
+        ]
+      },
+      "properties": {
+        "type": "dataset",
+        "identifier": "urn:dte:polytope:operational-data",
+        "title": "Destination Earth — Operational Forecast Data (EDR)",
+        "description": "Global operational forecast data from the Destination Earth initiative, accessible via the Polytope Environmental Data Retrieval (EDR) API. Includes temperature, wind, pressure, humidity, precipitation and more at multiple pressure levels.",
+        "language": "en",
+        "keywords": [
+          "forecast",
+          "NWP",
+          "temperature",
+          "wind",
+          "pressure",
+          "humidity",
+          "precipitation",
+          "Destination Earth",
+          "ECMWF",
+          "EDR"
+        ],
+        "themes": [
+          {
+            "concepts": [
+              {
+                "id": "weather",
+                "title": "Weather"
+              },
+              {
+                "id": "climate",
+                "title": "Climate"
+              }
+            ],
+            "scheme": "https://codes.wmo.int/wis/topic-hierarchy/earth-system-discipline"
+          }
+        ],
+        "contacts": [
+          {
+            "organization": "Destination Earth / ECMWF",
+            "emails": [
+              {
+                "value": "destination-earth@ecmwf.int"
+              }
+            ],
+            "addresses": [
+              {
+                "country": "FIN"
+              }
+            ],
+            "links": [
+              {
+                "rel": "about",
+                "href": "https://destination-earth.eu",
+                "type": "text/html"
+              }
+            ],
+            "roles": [
+              "host"
+            ]
+          }
+        ],
+        "created": "2025-12-01T00:00:00Z",
+        "updated": "2026-04-27T00:00:00Z",
+        "rights": "Destination Earth Data Access Policy",
+        "wmo:dataPolicy": "core",
+        "id": "urn:dte:polytope:operational-data",
+        "centre-id": "dte-polytope"
+      },
+      "links": [
+        {
+          "rel": "data",
+          "type": "application/json",
+          "href": "https://polytope-edr.lumi.apps.dte.destination-earth.eu/collections/operational-data?f=json",
+          "title": "Polytope EDR — operational-data collection JSON"
+        }
+      ]
+    }
+  ],
+  "numberMatched": 1,
+  "numberReturned": 1,
+  "links": [
+    {
+      "type": "application/geo+json",
+      "rel": "self",
+      "title": "This document as GeoJSON",
+      "href": "local://test-fixtures/polytope_items.json"
+    }
+  ],
+  "timeStamp": "2026-04-27T00:00:00Z"
+}
