@@ -1,9 +1,27 @@
 import flet as ft
 from datetime import datetime
 
+try:
+    from pyodide.http import pyfetch as _pyfetch
+    _is_pyodide = True
+except ModuleNotFoundError:
+    import httpx
+    _is_pyodide = False
 
-def RecordView(page: ft.Page, record: dict) -> ft.View:
-    
+from .edr_map import EDRMapView
+
+async def _fetch_json(url: str) -> dict:
+    if _is_pyodide:
+        response = await _pyfetch(url, method="GET")
+        return await response.json()
+    else:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, timeout=10)
+            return response.json()
+
+
+def RecordView(page: ft.Page, record: dict):
+
     # Extract data from the record
     props = record.get("properties", {})
     title = props.get("title", "No Title")
@@ -36,19 +54,19 @@ def RecordView(page: ft.Page, record: dict) -> ft.View:
             controls=[
                 ft.Icon(icon, size=16, color=ft.Colors.GREY_500),
                 ft.Text(f"{label}:", weight=ft.FontWeight.BOLD, size=12, color=ft.Colors.GREY_700, width=100),
-                ft.Text(value, size=12, selectable=True, expand=True), # Expand prevents overflow
+                ft.Text(value, size=12, selectable=True, expand=True),
             ],
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
 
     metadata_card = ft.Column(
-            controls=[
-                meta_row(ft.Icons.BUSINESS, "Organization", org_name),
-                meta_row(ft.Icons.POLICY, "License", rights),
-                meta_row(ft.Icons.CALENDAR_TODAY, "Created", created_str),
-                meta_row(ft.Icons.SHIELD, "Data Policy", data_policy),
-                meta_row(ft.Icons.EMAIL, "Email", email),
-            ] + ([meta_row(ft.Icons.PHONE, "Phone", phone)] if phone else [])
+        controls=[
+            meta_row(ft.Icons.BUSINESS, "Organization", org_name),
+            meta_row(ft.Icons.POLICY, "License", rights),
+            meta_row(ft.Icons.CALENDAR_TODAY, "Created", created_str),
+            meta_row(ft.Icons.SHIELD, "Data Policy", data_policy),
+            meta_row(ft.Icons.EMAIL, "Email", email),
+        ] + ([meta_row(ft.Icons.PHONE, "Phone", phone)] if phone else [])
     )
 
     # Keywords
@@ -58,62 +76,133 @@ def RecordView(page: ft.Page, record: dict) -> ft.View:
             ft.Chip(
                 label=ft.Text(tag, size=10),
                 bgcolor=ft.Colors.BLUE_GREY_50,
-                disabled=True # Purely visual
+                disabled=True,
             )
         )
 
-    # Links
+    # MQTT links (from record directly)
     links = record.get("links", [])
-    edr_tile = ft.Container()
     mqtt_tile = ft.Container()
+    collection_url = None
 
     for link in links:
         rel = link.get("rel")
-        if rel == "collection":
-            edr_tile = ft.ListTile(
-                leading=ft.Icon(ft.Icons.DATA_EXPLORATION, color=ft.Colors.BLUE),
-                title=ft.Text("Access Data (EDR)"),
-                subtitle=ft.Text("Environmental Data Retrieval API"),
-                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, size=16),
-                # on_click=lambda e, url=link.get("href"): page.launch_url(url),
-                bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
-                shape=ft.RoundedRectangleBorder(radius=8)
-            )
-        elif rel == "items":
+        if rel == "items":
             mqtt_tile = ft.ListTile(
                 leading=ft.Icon(ft.Icons.NOTIFICATIONS_ACTIVE, color=ft.Colors.AMBER_800),
                 title=ft.Text("Subscribe (AMQP/MQTT)"),
                 subtitle=ft.Text(f"Channel: {link.get('channel', 'N/A')}"),
                 trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, size=16),
-                # on_click=lambda e, code=link.get("href"): page.set_clipboard(code),
                 bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
-                shape=ft.RoundedRectangleBorder(radius=8)
+                shape=ft.RoundedRectangleBorder(radius=8),
             )
+        elif rel == "data" and collection_url is None:
+            href = link.get("href", "")
+            # We want the OGC API collection endpoint, not a raw data file.
+            # Heuristic: must be JSON and look like an OGC API collections path.
+            link_type = link.get("type", "")
+            if "json" in link_type or href.endswith("?f=json") or "/collections/" in href:
+                collection_url = href if "?f=json" in href else (href + "?f=json" if "?" not in href else href + "&f=json")
 
-    return ft.View(
+    # --- EDR / OGC Maps endpoint buttons ---
+    # Start in loading/unknown state; update after async check.
+
+    EDR_COLOR_ACTIVE = ft.Colors.BLUE
+    MAP_COLOR_ACTIVE = ft.Colors.GREEN
+    DISABLED_COLOR = ft.Colors.GREY_400
+
+    edr_btn = ft.Button(
+        content="EDR",
+        icon=ft.Icons.DATA_EXPLORATION,
+        bgcolor=DISABLED_COLOR,
+        disabled=True,
+        tooltip="Checking for EDR support..." if collection_url else "No EDR endpoint available",
+    )
+
+    map_btn = ft.Button(
+        content="OGC Maps",
+        icon=ft.Icons.MAP,
+        bgcolor=DISABLED_COLOR,
+        disabled=True,
+        tooltip="Checking for OGC Maps support..." if collection_url else "No OGC Maps endpoint available",
+    )
+
+    endpoint_row = ft.Row(
+        controls=[edr_btn, map_btn],
+        spacing=10,
+    )
+
+    async def check_endpoints(e):
+        if not collection_url:
+            return
+        try:
+            data = await _fetch_json(collection_url)
+        except Exception as ex:
+            edr_btn.tooltip = "Could not reach collection endpoint"
+            map_btn.tooltip = "Could not reach collection endpoint"
+            page.update()
+            return
+
+        # EDR: presence of data_queries key
+        edr_url = None
+        if data.get("data_queries"):
+            edr_url = collection_url
+
+        # OGC Maps: link with rel == OGC map relation
+        map_url = None
+        OGC_MAP_REL = "http://www.opengis.net/def/rel/ogc/1.0/map"
+        for lnk in data.get("links", []):
+            if lnk.get("rel") == OGC_MAP_REL:
+                map_url = lnk.get("href")
+                break
+
+        if edr_url:
+            edr_btn.bgcolor = EDR_COLOR_ACTIVE
+            edr_btn.disabled = False
+            edr_btn.tooltip = "Query this EDR collection on a map"
+
+            async def open_edr_map(e, url=edr_url, t=title):
+                map_view, load_metadata = EDRMapView(page, url, t)
+                page.views.append(map_view)
+                page.update()
+                await load_metadata()
+
+            edr_btn.on_click = open_edr_map
+        else:
+            edr_btn.tooltip = "EDR not available for this collection"
+
+        if map_url:
+            map_btn.bgcolor = MAP_COLOR_ACTIVE
+            map_btn.disabled = False
+            map_btn.tooltip = "Open OGC Maps endpoint"
+            map_btn.on_click = lambda e, url=map_url: page.launch_url(url)
+        else:
+            map_btn.tooltip = "OGC Maps not available for this collection"
+
+        page.update()
+
+    view = ft.View(
         route=f"/{rec_id}",
         padding=20,
         controls=[
-            ft.AppBar(
-                title=ft.Text(title), 
-            ),
-            
-            # Scrollable Column for content
+            ft.AppBar(title=ft.Text(title)),
             ft.Column(
                 scroll=ft.ScrollMode.AUTO,
                 expand=True,
                 controls=[
                     tags_wrap,
-                    ft.Divider(height= 10),
+                    ft.Divider(height=10),
                     ft.Text(desc_text, size=14, max_lines=3, overflow=ft.TextOverflow.ELLIPSIS),
                     ft.Divider(height=10),
                     metadata_card,
                     ft.Divider(height=10),
-                    
-                    # Links
-                    edr_tile,
+                    ft.Text("Data Access", weight=ft.FontWeight.BOLD, size=14),
+                    endpoint_row,
+                    ft.Divider(height=10),
                     mqtt_tile,
-                ]
-            )
-        ]
+                ],
+            ),
+        ],
     )
+
+    return view, check_endpoints

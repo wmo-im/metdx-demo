@@ -3,15 +3,19 @@ name = "metdx-demo-ui"
 version = "0.1.0"
 description = "Web UI component for the SG-FIT metdx demo"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.11"
 dependencies = [
-    "requests>=2.32.5",
-    "flet",
+    "flet==0.80.2",
+    "flet-map==0.80.2",
+    "httpx>=0.27",
 ]
 
 [dependency-groups]
 dev = [
-    "flet[all]>=0.80.2",
+    "flet[all]==0.80.2",
+    "flet-cli==0.80.2",
+    "flet-desktop==0.80.2",
+    "flet-web==0.80.2",
 ]
 
 [tool.flet.app]
