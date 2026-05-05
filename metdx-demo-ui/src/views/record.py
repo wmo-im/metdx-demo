@@ -9,6 +9,7 @@ except ModuleNotFoundError:
     _is_pyodide = False
 
 from .edr_map import EDRMapView
+from .ogc_map import OGCMapView
 
 async def _fetch_json(url: str) -> dict:
     if _is_pyodide:
@@ -80,10 +81,10 @@ def RecordView(page: ft.Page, record: dict):
             )
         )
 
-    # MQTT links (from record directly)
+    # MQTT links and data links (from record directly)
     links = record.get("links", [])
     mqtt_tile = ft.Container()
-    collection_url = None
+    collection_urls = []
 
     for link in links:
         rel = link.get("rel")
@@ -96,13 +97,12 @@ def RecordView(page: ft.Page, record: dict):
                 bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
                 shape=ft.RoundedRectangleBorder(radius=8),
             )
-        elif rel == "data" and collection_url is None:
+        elif rel == "data":
             href = link.get("href", "")
-            # We want the OGC API collection endpoint, not a raw data file.
-            # Heuristic: must be JSON and look like an OGC API collections path.
             link_type = link.get("type", "")
             if "json" in link_type or href.endswith("?f=json") or "/collections/" in href:
-                collection_url = href if "?f=json" in href else (href + "?f=json" if "?" not in href else href + "&f=json")
+                url = href if "?f=json" in href else (href + "?f=json" if "?" not in href else href + "&f=json")
+                collection_urls.append(url)
 
     # --- EDR / OGC Maps endpoint buttons ---
     # Start in loading/unknown state; update after async check.
@@ -116,7 +116,7 @@ def RecordView(page: ft.Page, record: dict):
         icon=ft.Icons.DATA_EXPLORATION,
         bgcolor=DISABLED_COLOR,
         disabled=True,
-        tooltip="Checking for EDR support..." if collection_url else "No EDR endpoint available",
+        tooltip="Checking for EDR support..." if collection_urls else "No EDR endpoint available",
     )
 
     map_btn = ft.Button(
@@ -124,7 +124,7 @@ def RecordView(page: ft.Page, record: dict):
         icon=ft.Icons.MAP,
         bgcolor=DISABLED_COLOR,
         disabled=True,
-        tooltip="Checking for OGC Maps support..." if collection_url else "No OGC Maps endpoint available",
+        tooltip="Checking for OGC Maps support..." if collection_urls else "No OGC Maps endpoint available",
     )
 
     endpoint_row = ft.Row(
@@ -133,28 +133,35 @@ def RecordView(page: ft.Page, record: dict):
     )
 
     async def check_endpoints(e):
-        if not collection_url:
-            return
-        try:
-            data = await _fetch_json(collection_url)
-        except Exception as ex:
-            edr_btn.tooltip = "Could not reach collection endpoint"
-            map_btn.tooltip = "Could not reach collection endpoint"
-            page.update()
+        if not collection_urls:
             return
 
-        # EDR: presence of data_queries key
+        from urllib.parse import urlparse
+
         edr_url = None
-        if data.get("data_queries"):
-            edr_url = collection_url
-
-        # OGC Maps: link with rel == OGC map relation
         map_url = None
         OGC_MAP_REL = "http://www.opengis.net/def/rel/ogc/1.0/map"
-        for lnk in data.get("links", []):
-            if lnk.get("rel") == OGC_MAP_REL:
-                map_url = lnk.get("href")
-                break
+
+        for col_url in collection_urls:
+            try:
+                data = await _fetch_json(col_url)
+            except Exception:
+                continue
+
+            # EDR: presence of data_queries key
+            if not edr_url and data.get("data_queries"):
+                edr_url = col_url
+
+            # OGC Maps: link with map relation
+            if not map_url:
+                for lnk in data.get("links", []):
+                    if lnk.get("rel") == OGC_MAP_REL:
+                        raw = lnk.get("href", "")
+                        if raw.startswith("/"):
+                            parsed = urlparse(col_url)
+                            raw = f"{parsed.scheme}://{parsed.netloc}{raw}"
+                        map_url = raw
+                        break
 
         if edr_url:
             edr_btn.bgcolor = EDR_COLOR_ACTIVE
@@ -174,8 +181,14 @@ def RecordView(page: ft.Page, record: dict):
         if map_url:
             map_btn.bgcolor = MAP_COLOR_ACTIVE
             map_btn.disabled = False
-            map_btn.tooltip = "Open OGC Maps endpoint"
-            map_btn.on_click = lambda e, url=map_url: page.launch_url(url)
+            map_btn.tooltip = "View OGC Maps for this collection"
+
+            async def open_ogc_map(e, url=map_url, t=title):
+                ogc_view = OGCMapView(page, url, t)
+                page.views.append(ogc_view)
+                page.update()
+
+            map_btn.on_click = open_ogc_map
         else:
             map_btn.tooltip = "OGC Maps not available for this collection"
 
