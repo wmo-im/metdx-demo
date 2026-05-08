@@ -12,14 +12,54 @@ except ModuleNotFoundError:
     _is_pyodide = False
 
 
-async def _fetch_json(url: str) -> dict:
+async def _fetch_json(url: str, *, follow_jobs: bool = False) -> dict:
     if _is_pyodide:
         response = await _pyfetch(url, method="GET")
         return await response.json()
     else:
         async with httpx.AsyncClient() as client:
-            response = await client.get(url, timeout=15)
-            return response.json()
+            if not follow_jobs:
+                response = await client.get(url, timeout=15, follow_redirects=True)
+                return response.json()
+            # EDR async job pattern: don't auto-follow redirects
+            import asyncio
+            response = await client.get(url, timeout=30, follow_redirects=False)
+            # If 303 redirect → async job
+            if response.status_code == 303:
+                job_url = response.headers.get("location", "")
+                if job_url.startswith("/"):
+                    from urllib.parse import urlparse
+                    parsed = urlparse(url)
+                    job_url = f"{parsed.scheme}://{parsed.netloc}{job_url}"
+                # Long-poll the job endpoint
+                for _ in range(60):  # up to ~5 minutes
+                    resp = await client.get(job_url, timeout=10)
+                    data = resp.json()
+                    status = data.get("status", "")
+                    if status in ("successful", "completed", "finished"):
+                        # Get result from the result link or inline
+                        for lnk in data.get("links", []):
+                            if lnk.get("rel") == "results":
+                                result_url = lnk["href"]
+                                if result_url.startswith("/"):
+                                    result_url = f"{parsed.scheme}://{parsed.netloc}{result_url}"
+                                r = await client.get(result_url, timeout=30)
+                                return r.json()
+                        return data
+                    elif status in ("failed", "error", "dismissed"):
+                        raise Exception(f"Job failed: {data.get('message', status)}")
+                    await asyncio.sleep(5)
+                raise Exception("Job timed out after 5 minutes")
+            elif response.status_code in (301, 302, 307, 308):
+                loc = response.headers.get("location", "")
+                if loc.startswith("/"):
+                    from urllib.parse import urlparse
+                    parsed = urlparse(url)
+                    loc = f"{parsed.scheme}://{parsed.netloc}{loc}"
+                response = await client.get(loc, timeout=30)
+                return response.json()
+            else:
+                return response.json()
 
 
 class EDRMode(Enum):
@@ -47,7 +87,7 @@ MODE_HELP = {
     EDRMode.POSITION:   "Tap to set a single point",
     EDRMode.AREA:       "Tap two corners to define a bounding box",
     EDRMode.TRAJECTORY: "Tap points to build a path",
-    EDRMode.RADIUS:     "Tap to set centre, then tap again to set radius edge",
+    EDRMode.RADIUS:     "Tap to set centre, then enter radius in degrees",
 }
 
 
@@ -62,6 +102,7 @@ def _build_edr_url(
     selected_params: list[str],
     selected_datetime: str | None,
     instance_id: str | None,
+    radius_degrees: float | None = None,
 ) -> str | None:
     """Build an EDR query URL from the collected points, parameters, datetime, and instance."""
     base = base_url.split("?")[0].rstrip("/")
@@ -97,15 +138,8 @@ def _build_edr_url(
         coords_part = f"LINESTRING({coord_str})"
         endpoint = "trajectory"
 
-    elif mode == EDRMode.RADIUS and len(points) >= 2:
+    elif mode == EDRMode.RADIUS and len(points) >= 1 and radius_degrees is not None:
         lat, lon = points[0]
-        lat2, lon2 = points[1]
-        dlat = math.radians(lat2 - lat)
-        dlon = math.radians(lon2 - lon)
-        a = (math.sin(dlat / 2) ** 2 +
-             math.cos(math.radians(lat)) * math.cos(math.radians(lat2)) *
-             math.sin(dlon / 2) ** 2)
-        radius_km = round(6371 * 2 * math.asin(math.sqrt(a)), 2)
         coords_part = f"POINT({lon} {lat})"
         endpoint = "radius"
     else:
@@ -113,8 +147,8 @@ def _build_edr_url(
 
     url = f"{base}/{endpoint}?coords={coords_part}"
 
-    if mode == EDRMode.RADIUS and radius_km is not None:
-        url += f"&within={radius_km}&within-units=km"
+    if mode == EDRMode.RADIUS and radius_degrees is not None:
+        url += f"&within={radius_degrees}&within-units=degrees"
 
     if selected_params:
         url += f"&parameter-name={','.join(selected_params)}"
@@ -144,6 +178,7 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
     marker_layer = fm.MarkerLayer(markers=[])
     polyline_layer = fm.PolylineLayer(polylines=[])
     polygon_layer = fm.PolygonLayer(polygons=[])
+    bbox_layer = fm.PolygonLayer(polygons=[])
     circle_layer = fm.CircleLayer(circles=[])
 
     # --- URL display ---
@@ -178,6 +213,23 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
     status_text = ft.Text(
         MODE_HELP[current_mode], size=12, color=ft.Colors.GREY_700, italic=True,
     )
+
+    # --- Radius input ---
+    radius_field = ft.TextField(
+        value="5",
+        label="Radius (degrees)",
+        width=140,
+        text_size=12,
+        visible=False,
+        content_padding=ft.Padding.symmetric(horizontal=8, vertical=4),
+        on_change=lambda e: (rebuild_layers(), refresh_url(), page.update()),
+    )
+
+    def _get_radius_degrees() -> float | None:
+        try:
+            return float(radius_field.value)
+        except (ValueError, TypeError):
+            return None
 
     # --- Instance selection (optional) ---
     use_instance = False  # toggled by the switch
@@ -275,6 +327,7 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
         url = _build_edr_url(
             collection_url, current_mode, tapped_points,
             selected_params, selected_datetime, selected_instance,
+            radius_degrees=_get_radius_degrees() if current_mode == EDRMode.RADIUS else None,
         )
         url_field.value = url or ""
 
@@ -348,25 +401,20 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
                         content=ft.Icon(ft.Icons.PLACE, color=color, size=28),
                     )
                 )
-            if len(tapped_points) >= 2:
-                lat1, lon1 = tapped_points[0]
-                lat2, lon2 = tapped_points[1]
-                dlat = math.radians(lat2 - lat1)
-                dlon = math.radians(lon2 - lon1)
-                a = (math.sin(dlat / 2) ** 2 +
-                     math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
-                     math.sin(dlon / 2) ** 2)
-                radius_km = 6371 * 2 * math.asin(math.sqrt(a))
-                circle_layer.circles.append(
-                    fm.CircleMarker(
-                        coordinates=_latlng(lat1, lon1),
-                        radius=radius_km * 1000,
-                        use_radius_in_meter=True,
-                        color=ft.Colors.with_opacity(0.2, color),
-                        border_color=color,
-                        border_stroke_width=2,
+                rd = _get_radius_degrees()
+                if rd and rd > 0:
+                    # Convert degrees to km for display (approx 111 km per degree)
+                    radius_km = rd * 111.0
+                    circle_layer.circles.append(
+                        fm.CircleMarker(
+                            coordinates=_latlng(lat, lon),
+                            radius=radius_km * 1000,
+                            use_radius_in_meter=True,
+                            color=ft.Colors.with_opacity(0.2, color),
+                            border_color=color,
+                            border_stroke_width=2,
+                        )
                     )
-                )
 
         refresh_url()
         page.update()
@@ -386,10 +434,7 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
         elif current_mode == EDRMode.TRAJECTORY:
             tapped_points.append((lat, lon))
         elif current_mode == EDRMode.RADIUS:
-            if len(tapped_points) >= 2:
-                tapped_points = [(lat, lon)]
-            else:
-                tapped_points.append((lat, lon))
+            tapped_points = [(lat, lon)]
 
         rebuild_layers()
 
@@ -400,6 +445,7 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
         status_text.value = MODE_HELP[mode]
         url_field.value = ""
         rebuild_layers()
+        radius_field.visible = (current_mode == EDRMode.RADIUS)
         for m, btn in mode_buttons.items():
             btn.style = ft.ButtonStyle(
                 bgcolor=MODE_COLOR[m] if m == current_mode else ft.Colors.GREY_200,
@@ -568,6 +614,28 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
 
         # Fall back to collection-level temporal extent for datetime prefill
         extent = data.get("extent", {})
+
+        # Show spatial bbox on map
+        spatial = extent.get("spatial", {})
+        spatial_bbox = spatial.get("bbox", [])
+        if spatial_bbox:
+            bb = spatial_bbox[0]  # [west, south, east, north]
+            if len(bb) >= 4:
+                w, s, e, n = bb[0], bb[1], bb[2], bb[3]
+                bbox_layer.polygons = [
+                    fm.PolygonMarker(
+                        coordinates=[
+                            _latlng(n, w),
+                            _latlng(n, e),
+                            _latlng(s, e),
+                            _latlng(s, w),
+                        ],
+                        color=ft.Colors.with_opacity(0.25, ft.Colors.ORANGE),
+                        border_color=ft.Colors.ORANGE_700,
+                        border_stroke_width=3,
+                    )
+                ]
+
         temporal = extent.get("temporal", {})
         intervals = temporal.get("interval", [[None, None]])
         t_start = intervals[0][0] if intervals else None
@@ -627,6 +695,7 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
             polyline_layer,
             polygon_layer,
             circle_layer,
+            bbox_layer,
         ],
         initial_center=_latlng(20, 0),
         initial_zoom=2.0,
@@ -639,6 +708,7 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
         controls=[
             *mode_buttons.values(),
             ft.VerticalDivider(width=1),
+            radius_field,
             ft.IconButton(
                 icon=ft.Icons.DELETE_OUTLINE,
                 tooltip="Clear",
@@ -667,17 +737,62 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
     )
     response_status = ft.Text("", size=11, color=ft.Colors.GREY_600)
 
+    MAX_DISPLAY_SIZE = 50_000  # chars
+
+    async def _save_response(e, json_str=None):
+        """Save response JSON to a temp file and open it."""
+        if not json_str:
+            return
+        import tempfile, os
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", prefix="edr_response_", delete=False
+        )
+        tmp.write(json_str)
+        tmp.close()
+        await page.launch_url(f"file://{tmp.name}")
+
+    download_btn = ft.Button(
+        content="Save response as file",
+        icon=ft.Icons.DOWNLOAD,
+        style=ft.ButtonStyle(bgcolor=ft.Colors.TEAL, color=ft.Colors.WHITE),
+        visible=False,
+    )
+
     async def execute_query(e):
         if not url_field.value:
             return
         response_status.value = "Fetching..."
         response_container.visible = False
+        download_btn.visible = False
         page.update()
         try:
-            data = await _fetch_json(url_field.value)
+            data = await _fetch_json(url_field.value, follow_jobs=True)
             import json
-            response_text.value = json.dumps(data, indent=2)
-            response_status.value = "Response received"
+            full_json = json.dumps(data, indent=2)
+            size = len(full_json)
+
+            if size > MAX_DISPLAY_SIZE:
+                # Too large to render — show summary + download
+                n_keys = len(data) if isinstance(data, dict) else len(data) if isinstance(data, list) else 0
+                summary = f"Response too large to display ({size:,} chars).\n"
+                if isinstance(data, dict):
+                    summary += f"Top-level keys: {', '.join(data.keys())}\n"
+                    if "ranges" in data:
+                        summary += f"Ranges: {', '.join(data['ranges'].keys())}\n"
+                    if "coverages" in data:
+                        summary += f"Coverages: {len(data['coverages'])}\n"
+                response_text.value = summary
+                response_status.value = f"Response received ({size:,} chars — truncated)"
+
+                async def _do_save(e, js=full_json):
+                    await _save_response(e, js)
+                download_btn.on_click = _do_save
+                download_btn.visible = True
+            else:
+                response_text.value = full_json
+                response_status.value = "Response received"
+                download_btn.visible = False
+
             response_status.color = ft.Colors.GREEN_700
             response_container.visible = True
         except Exception as ex:
@@ -685,6 +800,7 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
             response_status.value = "Request failed"
             response_status.color = ft.Colors.RED_400
             response_container.visible = True
+            download_btn.visible = False
         page.update()
 
     execute_btn = ft.Button(
@@ -695,7 +811,7 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
     )
 
     query_row = ft.Row(
-        controls=[execute_btn, response_status],
+        controls=[execute_btn, response_status, download_btn],
         spacing=8,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )

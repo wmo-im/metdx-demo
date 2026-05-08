@@ -151,13 +151,13 @@
       },
       "links": [
         {
-          "rel": "data",
+          "rel": "collection",
           "type": "application/json",
           "href": "https://polytope-edr.lumi.apps.dte.destination-earth.eu/collections/operational-data?f=json",
           "title": "OGC EDR — Operational forecast data (position, area, trajectory, radius queries)"
         },
         {
-          "rel": "data",
+          "rel": "collection",
           "type": "application/json",
           "href": "https://polytope-edr.lumi.apps.dte.destination-earth.eu/collections/operational_map_server?f=json",
           "title": "OGC Maps — Rendered forecast map images"

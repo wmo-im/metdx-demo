@@ -97,7 +97,7 @@ def RecordView(page: ft.Page, record: dict):
                 bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
                 shape=ft.RoundedRectangleBorder(radius=8),
             )
-        elif rel == "data":
+        elif rel == "collection":
             href = link.get("href", "")
             link_type = link.get("type", "")
             if "json" in link_type or href.endswith("?f=json") or "/collections/" in href:
@@ -132,6 +132,8 @@ def RecordView(page: ft.Page, record: dict):
         spacing=10,
     )
 
+    query_types_row = ft.Row(wrap=True, spacing=4, visible=False)
+
     async def check_endpoints(e):
         if not collection_urls:
             return
@@ -139,7 +141,9 @@ def RecordView(page: ft.Page, record: dict):
         from urllib.parse import urlparse
 
         edr_url = None
+        edr_query_types = []
         map_url = None
+        map_collection_url = None
         OGC_MAP_REL = "http://www.opengis.net/def/rel/ogc/1.0/map"
 
         for col_url in collection_urls:
@@ -151,6 +155,7 @@ def RecordView(page: ft.Page, record: dict):
             # EDR: presence of data_queries key
             if not edr_url and data.get("data_queries"):
                 edr_url = col_url
+                edr_query_types = list(data["data_queries"].keys())
 
             # OGC Maps: link with map relation
             if not map_url:
@@ -161,12 +166,30 @@ def RecordView(page: ft.Page, record: dict):
                             parsed = urlparse(col_url)
                             raw = f"{parsed.scheme}://{parsed.netloc}{raw}"
                         map_url = raw
+                        map_collection_url = col_url
                         break
 
         if edr_url:
             edr_btn.bgcolor = EDR_COLOR_ACTIVE
             edr_btn.disabled = False
             edr_btn.tooltip = "Query this EDR collection on a map"
+
+            # Show available query types as chips
+            if edr_query_types:
+                query_types_row.controls.clear()
+                query_types_row.controls.append(
+                    ft.Text("Query types:", size=12, color=ft.Colors.GREY_700)
+                )
+                for qt in edr_query_types:
+                    query_types_row.controls.append(
+                        ft.Container(
+                            content=ft.Text(qt, size=10, color=ft.Colors.WHITE),
+                            bgcolor=ft.Colors.BLUE_700,
+                            padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+                            border_radius=10,
+                        )
+                    )
+                query_types_row.visible = True
 
             async def open_edr_map(e, url=edr_url, t=title):
                 map_view, load_metadata = EDRMapView(page, url, t)
@@ -183,10 +206,11 @@ def RecordView(page: ft.Page, record: dict):
             map_btn.disabled = False
             map_btn.tooltip = "View OGC Maps for this collection"
 
-            async def open_ogc_map(e, url=map_url, t=title):
-                ogc_view = OGCMapView(page, url, t)
+            async def open_ogc_map(e, url=map_url, col_url=map_collection_url, t=title):
+                ogc_view, load_meta = OGCMapView(page, url, t, col_url)
                 page.views.append(ogc_view)
                 page.update()
+                await load_meta()
 
             map_btn.on_click = open_ogc_map
         else:
@@ -211,6 +235,7 @@ def RecordView(page: ft.Page, record: dict):
                     ft.Divider(height=10),
                     ft.Text("Data Access", weight=ft.FontWeight.BOLD, size=14),
                     endpoint_row,
+                    query_types_row,
                     ft.Divider(height=10),
                     mqtt_tile,
                 ],
