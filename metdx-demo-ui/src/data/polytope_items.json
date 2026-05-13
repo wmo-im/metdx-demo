@@ -175,10 +175,74 @@
           "title": "Destination Earth initiative"
         }
       ]
+    },
+    {
+      "id": "urn:wmo:md:ecmwf:opendata",
+      "type": "Feature",
+      "conformsTo": [
+        "http://wis.wmo.int/spec/wcmp/2/conf/core"
+      ],
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-180, -90],
+            [ 180, -90],
+            [ 180,  90],
+            [-180,  90],
+            [-180, -90]
+          ]
+        ]
+      },
+      "time": {
+        "interval": [
+          "2024-01-01",
+          ".."
+        ],
+        "resolution": "PT6H"
+      },
+      "properties": {
+        "type": "dataset",
+        "title": "ECMWF Open Data — Real-time Forecasts",
+        "description": "Free-to-use subset of ECMWF real-time forecast data including medium-range and extended-range weather predictions at 0.25 degree resolution, covering parameters such as temperature, wind, precipitation, and pressure.",
+        "keywords": [
+          "weather",
+          "forecast",
+          "open data",
+          "ECMWF",
+          "IFS",
+          "global",
+          "medium-range"
+        ],
+        "created": "2024-03-01T00:00:00Z",
+        "updated": "2026-05-13T00:00:00Z",
+        "wmo:dataPolicy": "core",
+        "contacts": [
+          {
+            "organization": "ECMWF",
+            "roles": ["host"],
+            "contactInfo": {
+              "url": {
+                "rel": "about",
+                "type": "text/html",
+                "href": "https://www.ecmwf.int"
+              }
+            }
+          }
+        ]
+      },
+      "links": [
+        {
+          "rel": "data",
+          "type": "text/html",
+          "title": "ECMWF Open Data portal",
+          "href": "https://data.ecmwf.int/"
+        }
+      ]
     }
   ],
-  "numberMatched": 1,
-  "numberReturned": 1,
+  "numberMatched": 2,
+  "numberReturned": 2,
   "links": [
     {
       "type": "application/geo+json",

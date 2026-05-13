@@ -1,4 +1,5 @@
 import flet as ft
+import flet.canvas as cv
 import flet_map as fm
 import math
 from enum import Enum
@@ -87,7 +88,7 @@ MODE_HELP = {
     EDRMode.POSITION:   "Tap to set a single point",
     EDRMode.AREA:       "Tap two corners to define a bounding box",
     EDRMode.TRAJECTORY: "Tap points to build a path",
-    EDRMode.RADIUS:     "Tap to set centre, then enter radius in degrees",
+    EDRMode.RADIUS:     "Tap to set centre, then tap again to set radius (or enter manually)",
 }
 
 
@@ -434,7 +435,16 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
         elif current_mode == EDRMode.TRAJECTORY:
             tapped_points.append((lat, lon))
         elif current_mode == EDRMode.RADIUS:
-            tapped_points = [(lat, lon)]
+            if len(tapped_points) >= 2:
+                tapped_points = [(lat, lon)]
+            else:
+                tapped_points.append((lat, lon))
+                if len(tapped_points) == 2:
+                    # Compute radius in degrees from the two points
+                    lat1, lon1 = tapped_points[0]
+                    lat2, lon2 = tapped_points[1]
+                    deg = ((lat2 - lat1) ** 2 + (lon2 - lon1) ** 2) ** 0.5
+                    radius_field.value = f"{deg:.2f}"
 
         rebuild_layers()
 
@@ -737,7 +747,133 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
     )
     response_status = ft.Text("", size=11, color=ft.Colors.GREY_600)
 
+    # --- Timeseries chart ---
+    chart_container = ft.Container(
+        visible=False,
+        height=220,
+        bgcolor=ft.Colors.WHITE,
+        border=ft.Border.all(1, ft.Colors.GREY_300),
+        border_radius=6,
+        padding=10,
+    )
+
     MAX_DISPLAY_SIZE = 50_000  # chars
+
+    def _build_timeseries_chart(data: dict) -> bool:
+        """Try to extract timeseries from CoverageJSON and build a canvas chart.
+        Returns True if a chart was built."""
+        if not isinstance(data, dict):
+            return False
+
+        # Handle both single Coverage and CoverageCollection
+        coverage = None
+        if data.get("type") == "CoverageCollection":
+            coverages = data.get("coverages", [])
+            if coverages:
+                coverage = coverages[0]
+        elif data.get("type") == "Coverage":
+            coverage = data
+        elif data.get("domain") and data.get("ranges"):
+            coverage = data
+
+        if not coverage:
+            return False
+
+        domain = coverage.get("domain", {})
+        axes = domain.get("axes", {})
+        t_axis = axes.get("t", {})
+        t_values = t_axis.get("values", [])
+        ranges = coverage.get("ranges", {})
+
+        # Also check top-level parameters for unit info
+        top_params = data.get("parameters", {})
+
+        if not t_values or not ranges:
+            return False
+
+        # Use first range
+        param_name = list(ranges.keys())[0]
+        range_data = ranges[param_name]
+        values = range_data.get("values", [])
+
+        if not values or len(values) != len(t_values):
+            return False
+
+        # Filter out None values
+        points = [(i, v) for i, v in enumerate(values) if v is not None]
+        if len(points) < 2:
+            return False
+
+        # Chart dimensions
+        chart_w = 600.0
+        chart_h = 180.0
+        margin_l = 50.0
+        margin_b = 30.0
+        plot_w = chart_w - margin_l - 10
+        plot_h = chart_h - margin_b - 10
+
+        y_vals = [p[1] for p in points]
+        y_min, y_max = min(y_vals), max(y_vals)
+        if y_min == y_max:
+            y_min -= 1
+            y_max += 1
+        x_min, x_max = points[0][0], points[-1][0]
+        if x_min == x_max:
+            x_max += 1
+
+        def to_canvas(ix, val):
+            x = margin_l + (ix - x_min) / (x_max - x_min) * plot_w
+            y = 10 + plot_h - (val - y_min) / (y_max - y_min) * plot_h
+            return x, y
+
+        shapes = []
+
+        # Axes
+        shapes.append(cv.Line(margin_l, 10, margin_l, 10 + plot_h, paint=ft.Paint(color=ft.Colors.GREY_400, stroke_width=1, style=ft.PaintingStyle.STROKE)))
+        shapes.append(cv.Line(margin_l, 10 + plot_h, margin_l + plot_w, 10 + plot_h, paint=ft.Paint(color=ft.Colors.GREY_400, stroke_width=1, style=ft.PaintingStyle.STROKE)))
+
+        # Y-axis labels
+        for i in range(5):
+            val = y_min + (y_max - y_min) * i / 4
+            _, y = to_canvas(x_min, val)
+            shapes.append(cv.Text(margin_l - 45, y - 5, f"{val:.1f}", style=ft.TextStyle(size=8, color=ft.Colors.GREY_700)))
+
+        # X-axis labels (first, middle, last) — show date
+        for idx in [0, len(t_values) // 2, len(t_values) - 1]:
+            x, _ = to_canvas(idx, y_min)
+            label = t_values[idx][:10]  # YYYY-MM-DD
+            shapes.append(cv.Text(x - 25, 10 + plot_h + 5, label, style=ft.TextStyle(size=8, color=ft.Colors.GREY_700)))
+
+        # Line path
+        path_points = []
+        for ix, val in points:
+            px, py = to_canvas(ix, val)
+            path_points.append((px, py))
+
+        # Draw line segments
+        for i in range(len(path_points) - 1):
+            x1, y1 = path_points[i]
+            x2, y2 = path_points[i + 1]
+            shapes.append(cv.Line(x1, y1, x2, y2, paint=ft.Paint(color=ft.Colors.BLUE_700, stroke_width=2, style=ft.PaintingStyle.STROKE)))
+
+        # Data points
+        for px, py in path_points:
+            shapes.append(cv.Circle(px, py, 2, paint=ft.Paint(color=ft.Colors.BLUE_900)))
+
+        # Title
+        unit = range_data.get("unit", {}).get("symbol", {}).get("value", "")
+        if not unit and param_name in top_params:
+            unit = top_params[param_name].get("unit", {}).get("symbol", "")
+        label_name = param_name
+        if param_name in top_params:
+            label_name = top_params[param_name].get("observedProperty", {}).get("label", {}).get("en", param_name)
+        title = f"{label_name}" + (f" ({unit})" if unit else "")
+        shapes.append(cv.Text(margin_l, 0, title, style=ft.TextStyle(size=10, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_900)))
+
+        canvas = cv.Canvas(shapes=shapes, width=chart_w, height=chart_h)
+        chart_container.content = canvas
+        chart_container.visible = True
+        return True
 
     async def _save_response(e, json_str=None):
         """Save response JSON to a temp file and open it."""
@@ -758,12 +894,28 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
         visible=False,
     )
 
+    show_data_btn = ft.Button(
+        content="Show Data",
+        icon=ft.Icons.CODE,
+        style=ft.ButtonStyle(bgcolor=ft.Colors.BLUE_GREY, color=ft.Colors.WHITE),
+        visible=False,
+    )
+
+    def _toggle_data(e):
+        response_container.visible = not response_container.visible
+        show_data_btn.content = "Hide Data" if response_container.visible else "Show Data"
+        page.update()
+
+    show_data_btn.on_click = _toggle_data
+
     async def execute_query(e):
         if not url_field.value:
             return
         response_status.value = "Fetching..."
         response_container.visible = False
+        chart_container.visible = False
         download_btn.visible = False
+        show_data_btn.visible = False
         page.update()
         try:
             data = await _fetch_json(url_field.value, follow_jobs=True)
@@ -771,8 +923,14 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
             full_json = json.dumps(data, indent=2)
             size = len(full_json)
 
+            # Try to build timeseries chart for position + single param
+            has_chart = False
+            if (current_mode == EDRMode.POSITION and
+                    len(selected_params) == 1 and
+                    isinstance(data, dict)):
+                has_chart = _build_timeseries_chart(data)
+
             if size > MAX_DISPLAY_SIZE:
-                # Too large to render — show summary + download
                 n_keys = len(data) if isinstance(data, dict) else len(data) if isinstance(data, list) else 0
                 summary = f"Response too large to display ({size:,} chars).\n"
                 if isinstance(data, dict):
@@ -794,13 +952,22 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
                 download_btn.visible = False
 
             response_status.color = ft.Colors.GREEN_700
-            response_container.visible = True
+
+            if has_chart:
+                # Show chart, hide data by default with button to reveal
+                response_container.visible = False
+                show_data_btn.visible = True
+                show_data_btn.content = "Show Data"
+            else:
+                response_container.visible = True
+
         except Exception as ex:
             response_text.value = str(ex)
             response_status.value = "Request failed"
             response_status.color = ft.Colors.RED_400
             response_container.visible = True
             download_btn.visible = False
+            show_data_btn.visible = False
         page.update()
 
     execute_btn = ft.Button(
@@ -811,7 +978,7 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
     )
 
     query_row = ft.Row(
-        controls=[execute_btn, response_status, download_btn],
+        controls=[execute_btn, response_status, show_data_btn, download_btn],
         spacing=8,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
@@ -871,6 +1038,7 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
                 ft.Divider(height=1),
                 query_row,
                 response_container,
+                chart_container,
             ],
             spacing=6,
             scroll=ft.ScrollMode.AUTO,

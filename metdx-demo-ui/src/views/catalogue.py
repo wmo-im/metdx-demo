@@ -86,25 +86,12 @@ def CatalogueView(page: ft.Page, local_fixture: str | None = None):
                     )
                 )
 
-            # API badges (EDR / Maps) — start as loading indicators
-            self._edr_badge = ft.Container(
-                content=ft.Text("EDR", size=9, color=ft.Colors.WHITE),
+            # Interactive badge — green if EDR or Maps available, grey otherwise
+            self._interactive_badge = ft.Container(
+                content=ft.Text("Interactive", size=9, color=ft.Colors.WHITE),
                 bgcolor=ft.Colors.GREY_400,
-                padding=ft.Padding.symmetric(horizontal=6, vertical=2),
+                padding=ft.Padding.symmetric(horizontal=8, vertical=3),
                 border_radius=8,
-                visible=False,
-            )
-            self._map_badge = ft.Container(
-                content=ft.Text("Maps", size=9, color=ft.Colors.WHITE),
-                bgcolor=ft.Colors.GREY_400,
-                padding=ft.Padding.symmetric(horizontal=6, vertical=2),
-                border_radius=8,
-                visible=False,
-            )
-            self._query_types_row = ft.Row(spacing=3, wrap=True, visible=False)
-            badges_row = ft.Row(
-                controls=[self._edr_badge, self._map_badge],
-                spacing=4,
             )
 
             async def _on_click(e, r=self.record):
@@ -112,7 +99,7 @@ def CatalogueView(page: ft.Page, local_fixture: str | None = None):
             self.on_click = _on_click
 
             self.content = ft.Column(controls=[
-                ft.Row(controls=[ft.Column(controls=[title_control, desc_control], expand=True), badges_row], vertical_alignment=ft.CrossAxisAlignment.START),
+                ft.Row(controls=[ft.Column(controls=[title_control, desc_control], expand=True), self._interactive_badge], vertical_alignment=ft.CrossAxisAlignment.START),
                 tags_row,
             ])
 
@@ -120,6 +107,7 @@ def CatalogueView(page: ft.Page, local_fixture: str | None = None):
             """Check collection links for EDR/Maps support."""
             record_links = self.record.get("links", [])
             OGC_MAP_REL = "http://www.opengis.net/def/rel/ogc/1.0/map"
+            is_interactive = False
 
             for link in record_links:
                 if link.get("rel") != "collection":
@@ -135,14 +123,15 @@ def CatalogueView(page: ft.Page, local_fixture: str | None = None):
                     continue
 
                 if data.get("data_queries"):
-                    self._edr_badge.bgcolor = ft.Colors.BLUE
-                    self._edr_badge.visible = True
+                    is_interactive = True
 
                 for lnk in data.get("links", []):
                     if lnk.get("rel") == OGC_MAP_REL:
-                        self._map_badge.bgcolor = ft.Colors.GREEN
-                        self._map_badge.visible = True
+                        is_interactive = True
                         break
+
+            if is_interactive:
+                self._interactive_badge.bgcolor = ft.Colors.GREEN
 
             page.update()
 
