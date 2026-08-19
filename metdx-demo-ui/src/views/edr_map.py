@@ -24,7 +24,7 @@ async def _fetch_json(url: str, *, follow_jobs: bool = False) -> dict:
                 return response.json()
             # EDR async job pattern: don't auto-follow redirects
             import asyncio
-            response = await client.get(url, timeout=30, follow_redirects=False)
+            response = await client.get(url, timeout=60, follow_redirects=False)
             # If 303 redirect → async job
             if response.status_code == 303:
                 job_url = response.headers.get("location", "")
@@ -68,6 +68,16 @@ class EDRMode(Enum):
     AREA = "area"
     TRAJECTORY = "trajectory"
     RADIUS = "radius"
+    CUBE = "cube"
+    CORRIDOR = "corridor"
+
+
+# ECMWF pressure-level parameters that require a vertical level to be specified.
+# Surface params (2t, 10u, msl, tp, ...) work without one; these do not.
+LEVEL_PARAMS = {"t", "u", "v", "w", "gh", "r", "q", "d", "vo", "pv"}
+
+# Common pressure levels (hPa) offered when a level parameter is selected.
+COMMON_LEVELS = ["1000", "925", "850", "700", "500", "400", "300", "250", "200", "100", "50"]
 
 
 MODE_COLOR = {
@@ -75,6 +85,8 @@ MODE_COLOR = {
     EDRMode.AREA:       ft.Colors.GREEN,
     EDRMode.TRAJECTORY: ft.Colors.ORANGE,
     EDRMode.RADIUS:     ft.Colors.PURPLE,
+    EDRMode.CUBE:       ft.Colors.TEAL,
+    EDRMode.CORRIDOR:   ft.Colors.PINK,
 }
 
 MODE_ICON = {
@@ -82,6 +94,8 @@ MODE_ICON = {
     EDRMode.AREA:       ft.Icons.CROP_SQUARE,
     EDRMode.TRAJECTORY: ft.Icons.TIMELINE,
     EDRMode.RADIUS:     ft.Icons.RADIO_BUTTON_UNCHECKED,
+    EDRMode.CUBE:       ft.Icons.VIEW_IN_AR,
+    EDRMode.CORRIDOR:   ft.Icons.ROUTE,
 }
 
 MODE_HELP = {
@@ -89,6 +103,8 @@ MODE_HELP = {
     EDRMode.AREA:       "Tap two corners to define a bounding box",
     EDRMode.TRAJECTORY: "Tap points to build a path",
     EDRMode.RADIUS:     "Tap to set centre, then tap again to set radius (or enter manually)",
+    EDRMode.CUBE:       "Tap two corners to define the cube's bounding box",
+    EDRMode.CORRIDOR:   "Tap points to build the corridor path, then set its width",
 }
 
 
@@ -104,6 +120,8 @@ def _build_edr_url(
     selected_datetime: str | None,
     instance_id: str | None,
     radius_degrees: float | None = None,
+    level: str | None = None,
+    corridor_width: float | None = None,
 ) -> str | None:
     """Build an EDR query URL from the collected points, parameters, datetime, and instance."""
     base = base_url.split("?")[0].rstrip("/")
@@ -114,6 +132,7 @@ def _build_edr_url(
 
     coords_part = None
     radius_km = None
+    extra = ""
 
     if mode == EDRMode.POSITION and len(points) >= 1:
         lat, lon = points[0]
@@ -134,10 +153,35 @@ def _build_edr_url(
         )
         endpoint = "area"
 
+    elif mode == EDRMode.CUBE and len(points) >= 2:
+        # Cube uses a bbox (minLon,minLat,maxLon,maxLat) rather than coords.
+        lats = [p[0] for p in points]
+        lons = [p[1] for p in points]
+        min_lat, max_lat = min(lats), max(lats)
+        min_lon, max_lon = min(lons), max(lons)
+        base = base_url.split("?")[0].rstrip("/")
+        if instance_id:
+            base = f"{base}/instances/{instance_id}"
+        url = f"{base}/cube?bbox={min_lon},{min_lat},{max_lon},{max_lat}"
+        if selected_params:
+            url += f"&parameter-name={','.join(selected_params)}"
+        if level and any(p in LEVEL_PARAMS for p in selected_params):
+            url += f"&z={level}"
+        if selected_datetime:
+            url += f"&datetime={selected_datetime}"
+        url += "&f=json"
+        return url
+
     elif mode == EDRMode.TRAJECTORY and len(points) >= 2:
         coord_str = ",".join(f"{lon} {lat}" for lat, lon in points)
         coords_part = f"LINESTRING({coord_str})"
         endpoint = "trajectory"
+
+    elif mode == EDRMode.CORRIDOR and len(points) >= 2 and corridor_width is not None:
+        coord_str = ",".join(f"{lon} {lat}" for lat, lon in points)
+        coords_part = f"LINESTRING({coord_str})"
+        endpoint = "corridor"
+        extra = f"&corridor-width={corridor_width}&width-units=degrees"
 
     elif mode == EDRMode.RADIUS and len(points) >= 1 and radius_degrees is not None:
         lat, lon = points[0]
@@ -151,8 +195,14 @@ def _build_edr_url(
     if mode == EDRMode.RADIUS and radius_degrees is not None:
         url += f"&within={radius_degrees}&within-units=degrees"
 
+    url += extra
+
     if selected_params:
         url += f"&parameter-name={','.join(selected_params)}"
+
+    # Vertical level (z) — required for pressure-level parameters.
+    if level and any(p in LEVEL_PARAMS for p in selected_params):
+        url += f"&z={level}"
 
     if selected_datetime:
         url += f"&datetime={selected_datetime}"
@@ -170,10 +220,12 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
     selected_params: list[str] = []
     selected_datetime: str | None = None
     selected_instance: str | None = None
+    selected_level: str | None = None
 
     # Available data fetched from collection — populated async
     available_params: dict[str, dict] = {}
     available_instances: list[dict] = []  # [{id, temporal_start, temporal_end}, ...]
+    supported_modes: set[EDRMode] = set()  # query types advertised by the collection
 
     # --- Map layers ---
     marker_layer = fm.MarkerLayer(markers=[])
@@ -215,22 +267,75 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
         MODE_HELP[current_mode], size=12, color=ft.Colors.GREY_700, italic=True,
     )
 
+    # Note listing advertised query types not implemented in this UI
+    unsupported_note = ft.Text(
+        "", size=10, color=ft.Colors.ORANGE_800, italic=True, visible=False,
+    )
+
     # --- Radius input ---
+    # The EDR endpoint only accepts the radius in degrees, so the unit is fixed
+    # and shown explicitly (with an approximate km equivalent as a helper).
+    RADIUS_UNITS = "degrees"
+
+    def _on_radius_change(e=None):
+        rebuild_layers()
+        _update_radius_hint()
+        refresh_url()
+        page.update()
+
     radius_field = ft.TextField(
         value="5",
-        label="Radius (degrees)",
-        width=140,
+        label="Radius",
+        suffix=ft.Text(RADIUS_UNITS, size=11, color=ft.Colors.GREY_600),
+        width=160,
         text_size=12,
         visible=False,
+        keyboard_type=ft.KeyboardType.NUMBER,
+        tooltip="Enter the search radius in degrees, or click the map to set it",
         content_padding=ft.Padding.symmetric(horizontal=8, vertical=4),
-        on_change=lambda e: (rebuild_layers(), refresh_url(), page.update()),
+        on_change=_on_radius_change,
     )
+
+    radius_hint = ft.Text("", size=10, color=ft.Colors.GREY_500, italic=True, visible=False)
+
+    # --- Corridor width input (degrees, like radius) ---
+    def _on_corridor_change(e=None):
+        rebuild_layers()
+        refresh_url()
+        page.update()
+
+    corridor_field = ft.TextField(
+        value="2",
+        label="Corridor width",
+        suffix=ft.Text("degrees", size=11, color=ft.Colors.GREY_600),
+        width=160,
+        text_size=12,
+        visible=False,
+        keyboard_type=ft.KeyboardType.NUMBER,
+        tooltip="Half-width of the corridor either side of the path, in degrees",
+        content_padding=ft.Padding.symmetric(horizontal=8, vertical=4),
+        on_change=_on_corridor_change,
+    )
+
+    def _get_corridor_width() -> float | None:
+        try:
+            return float(corridor_field.value)
+        except (ValueError, TypeError):
+            return None
 
     def _get_radius_degrees() -> float | None:
         try:
             return float(radius_field.value)
         except (ValueError, TypeError):
             return None
+
+    def _update_radius_hint():
+        rd = _get_radius_degrees()
+        if current_mode == EDRMode.RADIUS and rd and rd > 0:
+            radius_hint.value = f"≈ {rd * 111.0:.0f} km"
+            radius_hint.visible = True
+        else:
+            radius_hint.visible = False
 
     # --- Instance selection (optional) ---
     use_instance = False  # toggled by the switch
@@ -281,6 +386,53 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
         spacing=6,
     )
 
+    # --- Vertical level (for pressure-level parameters) ---
+    def on_level_change(e=None):
+        nonlocal selected_level
+        selected_level = level_dropdown.value or None
+        _update_level_section()
+        refresh_url()
+        page.update()
+
+    level_dropdown = ft.Dropdown(
+        label="Pressure level (hPa)",
+        width=180,
+        text_size=12,
+        options=[ft.dropdown.Option(key=lv, text=f"{lv} hPa") for lv in COMMON_LEVELS],
+    )
+    level_dropdown.on_change = on_level_change
+
+    level_prompt = ft.Text(
+        "", size=11, italic=True, visible=False,
+    )
+    level_section = ft.Column(
+        controls=[level_prompt, level_dropdown],
+        spacing=4,
+        visible=False,
+    )
+
+    def _update_level_section():
+        """Show the level selector + prompt whenever a pressure-level parameter
+        is selected, and warn until a level is actually chosen."""
+        level_params_selected = [p for p in selected_params if p in LEVEL_PARAMS]
+        if level_params_selected:
+            level_section.visible = True
+            if not selected_level:
+                level_prompt.value = (
+                    "⚠ " + ", ".join(level_params_selected)
+                    + " require a pressure level — select one below to query them."
+                )
+                level_prompt.color = ft.Colors.ORANGE_800
+            else:
+                level_prompt.value = (
+                    f"Querying {', '.join(level_params_selected)} at {selected_level} hPa"
+                )
+                level_prompt.color = ft.Colors.GREY_600
+            level_prompt.visible = True
+        else:
+            level_section.visible = False
+            level_prompt.visible = False
+
     # --- Datetime range selection ---
     datetime_section = ft.Column(spacing=4, visible=False)
     datetime_label = ft.Text("Datetime", weight=ft.FontWeight.BOLD, size=12)
@@ -329,6 +481,8 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
             collection_url, current_mode, tapped_points,
             selected_params, selected_datetime, selected_instance,
             radius_degrees=_get_radius_degrees() if current_mode == EDRMode.RADIUS else None,
+            level=selected_level,
+            corridor_width=_get_corridor_width() if current_mode == EDRMode.CORRIDOR else None,
         )
         url_field.value = url or ""
 
@@ -349,7 +503,7 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
                     )
                 )
 
-        elif current_mode == EDRMode.AREA:
+        elif current_mode in (EDRMode.AREA, EDRMode.CUBE):
             for lat, lon in tapped_points:
                 marker_layer.markers.append(
                     fm.Marker(
@@ -377,7 +531,7 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
                     )
                 )
 
-        elif current_mode == EDRMode.TRAJECTORY:
+        elif current_mode in (EDRMode.TRAJECTORY, EDRMode.CORRIDOR):
             for lat, lon in tapped_points:
                 marker_layer.markers.append(
                     fm.Marker(
@@ -413,26 +567,27 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
                             use_radius_in_meter=True,
                             color=ft.Colors.with_opacity(0.2, color),
                             border_color=color,
-                            border_stroke_width=2,
+                             border_stroke_width=2,
                         )
                     )
 
+        _update_radius_hint()
         refresh_url()
         page.update()
 
     def on_map_tap(e: fm.MapTapEvent):
         nonlocal tapped_points
-        lat = e.coordinates.latitude
-        lon = e.coordinates.longitude
+        lat = round(e.coordinates.latitude, 3)
+        lon = round(e.coordinates.longitude, 3)
 
         if current_mode == EDRMode.POSITION:
             tapped_points = [(lat, lon)]
-        elif current_mode == EDRMode.AREA:
+        elif current_mode in (EDRMode.AREA, EDRMode.CUBE):
             if len(tapped_points) >= 2:
                 tapped_points = [(lat, lon)]
             else:
                 tapped_points.append((lat, lon))
-        elif current_mode == EDRMode.TRAJECTORY:
+        elif current_mode in (EDRMode.TRAJECTORY, EDRMode.CORRIDOR):
             tapped_points.append((lat, lon))
         elif current_mode == EDRMode.RADIUS:
             if len(tapped_points) >= 2:
@@ -456,6 +611,8 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
         url_field.value = ""
         rebuild_layers()
         radius_field.visible = (current_mode == EDRMode.RADIUS)
+        corridor_field.visible = (current_mode == EDRMode.CORRIDOR)
+        _update_radius_hint()
         for m, btn in mode_buttons.items():
             btn.style = ft.ButtonStyle(
                 bgcolor=MODE_COLOR[m] if m == current_mode else ft.Colors.GREY_200,
@@ -479,6 +636,7 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
         else:
             if param_id in selected_params:
                 selected_params.remove(param_id)
+        _update_level_section()
         refresh_url()
         page.update()
 
@@ -488,6 +646,7 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
         for c in param_chips_row.controls:
             if isinstance(c, ft.Chip):
                 c.selected = True
+        _update_level_section()
         refresh_url()
         page.update()
 
@@ -497,6 +656,7 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
         for c in param_chips_row.controls:
             if isinstance(c, ft.Chip):
                 c.selected = False
+        _update_level_section()
         refresh_url()
         page.update()
 
@@ -562,6 +722,33 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
             ]
             page.update()
             return
+
+        # Align the query-mode buttons with the collection's advertised data_queries.
+        data_queries = data.get("data_queries", {}) or {}
+        nonlocal current_mode
+        _VALUE_TO_MODE = {m.value: m for m in EDRMode}
+        supported_modes.clear()
+        for qt in data_queries.keys():
+            m = _VALUE_TO_MODE.get(qt)
+            if m:
+                supported_modes.add(m)
+
+        # Show only buttons for supported query types; note unsupported advertised ones.
+        unsupported = [qt for qt in data_queries if qt not in _VALUE_TO_MODE]
+        for mode, btn in mode_buttons.items():
+            btn.visible = mode in supported_modes if supported_modes else True
+        if unsupported:
+            unsupported_note.value = (
+                "Also advertised (not yet supported in this UI): "
+                + ", ".join(unsupported)
+            )
+            unsupported_note.visible = True
+
+        # If the current mode isn't supported, switch to the first supported one.
+        if supported_modes and current_mode not in supported_modes:
+            first = next((m for m in EDRMode if m in supported_modes), None)
+            if first:
+                set_mode(first)
 
         # Parameters
         raw_params = data.get("parameter_names", {})
@@ -719,6 +906,8 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
             *mode_buttons.values(),
             ft.VerticalDivider(width=1),
             radius_field,
+            radius_hint,
+            corridor_field,
             ft.IconButton(
                 icon=ft.Icons.DELETE_OUTLINE,
                 tooltip="Clear",
@@ -746,6 +935,7 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
         height=200,
     )
     response_status = ft.Text("", size=11, color=ft.Colors.GREY_600)
+    query_spinner = ft.ProgressRing(width=16, height=16, stroke_width=2, visible=False)
 
     # --- Timeseries chart ---
     chart_container = ft.Container(
@@ -911,14 +1101,59 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
     async def execute_query(e):
         if not url_field.value:
             return
+        # The EDR endpoint requires at least one parameter (else 400).
+        if not selected_params:
+            response_status.value = "Select at least one parameter first"
+            response_status.color = ft.Colors.RED_400
+            response_text.value = ""
+            response_container.visible = False
+            chart_container.visible = False
+            download_btn.visible = False
+            show_data_btn.visible = False
+            page.update()
+            return
+        # Pressure-level parameters need a level (else the backend errors).
+        if any(p in LEVEL_PARAMS for p in selected_params) and not selected_level:
+            _lp = [p for p in selected_params if p in LEVEL_PARAMS]
+            response_status.value = (
+                f"Select a pressure level for {', '.join(_lp)} before querying"
+            )
+            response_status.color = ft.Colors.RED_400
+            response_text.value = ""
+            response_container.visible = False
+            chart_container.visible = False
+            download_btn.visible = False
+            show_data_btn.visible = False
+            _update_level_section()
+            page.update()
+            return
         response_status.value = "Fetching..."
+        response_status.color = ft.Colors.GREY_600
+        query_spinner.visible = True
+        execute_btn.disabled = True
         response_container.visible = False
         chart_container.visible = False
         download_btn.visible = False
         show_data_btn.visible = False
         page.update()
         try:
-            data = await _fetch_json(url_field.value, follow_jobs=True)
+            # The backend can be slow on a cold start (first request for a param
+            # combo), so retry a couple of times before giving up.
+            import asyncio
+            data = None
+            last_err = None
+            for attempt in range(3):
+                try:
+                    data = await _fetch_json(url_field.value, follow_jobs=True)
+                    break
+                except Exception as ex:
+                    last_err = ex
+                    if attempt < 2:
+                        response_status.value = f"Retrying ({attempt + 2}/3)..."
+                        page.update()
+                        await asyncio.sleep(2)
+            if data is None:
+                raise last_err or Exception("Request failed")
             import json
             full_json = json.dumps(data, indent=2)
             size = len(full_json)
@@ -968,6 +1203,9 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
             response_container.visible = True
             download_btn.visible = False
             show_data_btn.visible = False
+        finally:
+            query_spinner.visible = False
+            execute_btn.disabled = False
         page.update()
 
     execute_btn = ft.Button(
@@ -978,7 +1216,7 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
     )
 
     query_row = ft.Row(
-        controls=[execute_btn, response_status, show_data_btn, download_btn],
+        controls=[execute_btn, query_spinner, response_status, show_data_btn, download_btn],
         spacing=8,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
@@ -1021,6 +1259,7 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
             controls=[
                 toolbar,
                 status_text,
+                unsupported_note,
                 ft.Divider(height=1),
                 # Instance selector (optional)
                 instance_switch,
@@ -1030,6 +1269,7 @@ def EDRMapView(page: ft.Page, collection_url: str, collection_title: str) -> ft.
                 param_header,
                 param_loading,
                 param_chips_row,
+                level_section,
                 ft.Divider(height=1),
                 # Datetime range
                 datetime_section,

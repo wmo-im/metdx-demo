@@ -2,6 +2,16 @@ import flet as ft
 import flet_map as fm
 import tempfile
 import os
+import time
+import logging
+from collections import OrderedDict
+from datetime import datetime, timezone
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] ogc_map: %(message)s",
+)
+log = logging.getLogger("metdx.ogc_map")
 
 try:
     from pyodide.http import pyfetch as _pyfetch
@@ -12,6 +22,42 @@ except ModuleNotFoundError:
 
 # Keep track of temp files so they persist while displayed
 _temp_files: list[str] = []
+
+# --- Small LRU cache of rendered maps, keyed by the exact request URL ---
+# The map server encodes bbox/width/height/datetime in the URL, so only an
+# identical request can reuse a cached image. This still helps because the
+# server is slow and flaky: once a frame is fetched it can be re-displayed
+# instantly (e.g. revisiting the same view/datetime). Values are the resolved
+# image ``src`` (a local temp-file path on native, or the URL under pyodide).
+_MAP_CACHE_MAX = 12
+_map_cache: "OrderedDict[str, str]" = OrderedDict()
+
+
+def _cache_get(url: str) -> str | None:
+    src = _map_cache.get(url)
+    if src is None:
+        return None
+    # On native, ensure the cached temp file still exists
+    if not _is_pyodide and not os.path.exists(src):
+        _map_cache.pop(url, None)
+        return None
+    _map_cache.move_to_end(url)  # mark as most-recently-used
+    return src
+
+
+def _cache_put(url: str, src: str) -> None:
+    _map_cache[url] = src
+    _map_cache.move_to_end(url)
+    while len(_map_cache) > _MAP_CACHE_MAX:
+        _, old_src = _map_cache.popitem(last=False)
+        # Best-effort cleanup of evicted native temp files
+        if not _is_pyodide and old_src and os.path.exists(old_src):
+            try:
+                os.remove(old_src)
+                if old_src in _temp_files:
+                    _temp_files.remove(old_src)
+            except OSError:
+                pass
 
 
 def _latlng(lat, lon):
@@ -51,7 +97,8 @@ def OGCMapView(page: ft.Page, map_url: str, collection_title: str, collection_ur
         content_padding=ft.Padding.symmetric(horizontal=8, vertical=4),
     )
     datetime_field = ft.TextField(
-        value="", label="Datetime", width=260, text_size=12,
+        value=datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00Z"),
+        label="Datetime", width=260, text_size=12,
         hint_text="e.g. 2026-04-30T00:00:00Z",
         content_padding=ft.Padding.symmetric(horizontal=8, vertical=4),
     )
@@ -90,13 +137,20 @@ def OGCMapView(page: ft.Page, map_url: str, collection_title: str, collection_ur
     _schema_instances: list[str] = []
 
     def _clean_dt(s: str) -> str:
-        """Normalize datetime to Z suffix for UTC."""
+        """Normalize datetime to ISO 8601 with T separator and Z suffix.
+
+        Schema enum values look like '2026-08-18 00:00:00+00:00'; the backend
+        expects '2026-08-18T00:00:00Z'.
+        """
         if not s:
             return s
         import re
         s = s.strip()
-        # Fix space before tz offset → T separator if missing, then +
+        # Date/time separator: space → T (e.g. '2026-08-18 00:00:00' → '2026-08-18T00:00:00')
+        s = re.sub(r'(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})', r'\1T\2', s)
+        # Fix space before tz offset (rare) → '+'
         s = re.sub(r'(\d{2}:\d{2}:\d{2}) (\d{2}:\d{2})$', r'\1+\2', s)
+        # UTC offset → Z
         s = re.sub(r'\+00:00$', 'Z', s)
         return s
 
@@ -113,12 +167,12 @@ def OGCMapView(page: ft.Page, map_url: str, collection_title: str, collection_ur
         if not inst or not _schema_datetimes:
             return
 
-        # Instance is the run date; datetimes should be >= instance start
+        # Instance is the base run; only offer forecast datetimes at/after it.
+        # Both instance and datetimes are _clean_dt-normalized to the same
+        # 'YYYY-MM-DDTHH:MM:SSZ' format, so full-string comparison is valid.
         inst_clean = _clean_dt(inst)
-        # Parse instance date prefix for comparison
-        inst_prefix = inst_clean[:10]  # YYYY-MM-DD
 
-        filtered = [dt for dt in _schema_datetimes if dt[:10] >= inst_prefix]
+        filtered = [dt for dt in _schema_datetimes if dt >= inst_clean]
         datetime_dropdown.options = [
             ft.dropdown.Option(key=dt, text=dt) for dt in filtered
         ]
@@ -137,8 +191,13 @@ def OGCMapView(page: ft.Page, map_url: str, collection_title: str, collection_ur
         fit=ft.BoxFit.CONTAIN,
         expand=True,
         visible=False,
+        opacity=1.0,
     )
     loading = ft.ProgressRing(width=24, height=24, visible=False)
+    result_placeholder = ft.Text(
+        "Rendered map will appear here after you click Load Map",
+        size=12, color=ft.Colors.GREY_500,
+    )
     status_text = ft.Text(
         "Click Draw BBOX to select an area on the map, or edit BBOX manually",
         size=12, color=ft.Colors.GREY_600,
@@ -152,6 +211,22 @@ def OGCMapView(page: ft.Page, map_url: str, collection_title: str, collection_ur
         border_color=ft.Colors.GREY_300,
         content_padding=ft.Padding.symmetric(horizontal=8, vertical=4),
         hint_text="Map URL will appear here",
+    )
+
+    def clear_overlay(e):
+        map_image.visible = False
+        map_image.src = ""
+        result_placeholder.visible = True
+        status_text.value = "Result cleared"
+        status_text.color = ft.Colors.GREY_600
+        page.update()
+
+    clear_result_btn = ft.IconButton(
+        icon=ft.Icons.LAYERS_CLEAR,
+        tooltip="Clear rendered map",
+        on_click=clear_overlay,
+        icon_size=18,
+        visible=False,
     )
 
     def _update_bbox_polygon():
@@ -208,13 +283,13 @@ def OGCMapView(page: ft.Page, map_url: str, collection_title: str, collection_ur
         if not drawing_active[0]:
             return
 
-        lat = e.coordinates.latitude
-        lon = e.coordinates.longitude
+        lat = round(e.coordinates.latitude, 3)
+        lon = round(e.coordinates.longitude, 3)
 
         bbox_corners.append((lat, lon))
 
         if len(bbox_corners) == 1:
-            status_text.value = f"First corner: ({lat:.4f}, {lon:.4f}) — click second corner"
+            status_text.value = f"First corner: ({lat:.3f}, {lon:.3f}) — click second corner"
             status_text.color = ft.Colors.ORANGE
         elif len(bbox_corners) >= 2:
             # Done drawing
@@ -254,6 +329,19 @@ def OGCMapView(page: ft.Page, map_url: str, collection_title: str, collection_ur
         expand=True,
     )
 
+    def _default_datetime() -> str:
+        """Pick a sensible datetime so the map server never gets a request
+        without one (which returns a 500). Prefer a schema datetime matching
+        today, otherwise the latest schema value, otherwise today at 00:00Z."""
+        from datetime import date, datetime as _dt, timezone
+        today = date.today().isoformat()
+        if _schema_datetimes:
+            for dt in _schema_datetimes:
+                if dt[:10] == today:
+                    return dt
+            return _schema_datetimes[-1]
+        return _dt.now(timezone.utc).strftime("%Y-%m-%dT00:00:00Z")
+
     def build_url() -> str:
         base = map_url.split("?")[0]
         params = ["f=png"]
@@ -267,8 +355,11 @@ def OGCMapView(page: ft.Page, map_url: str, collection_title: str, collection_ur
         if h:
             params.append(f"height={h}")
         dt = datetime_field.value.strip()
-        if dt:
-            params.append(f"datetime={dt}")
+        if not dt:
+            # Always send a datetime — an empty one 500s on the server.
+            dt = _default_datetime()
+            datetime_field.value = dt
+        params.append(f"datetime={dt}")
         return f"{base}?{'&'.join(params)}"
 
     async def load_map(e):
@@ -276,36 +367,90 @@ def OGCMapView(page: ft.Page, map_url: str, collection_title: str, collection_ur
         url_display.value = url
         loading.visible = True
         map_image.visible = False
+        result_placeholder.visible = False
+        load_btn.disabled = True
         status_text.value = "Loading..."
         status_text.color = ft.Colors.GREY_600
         page.update()
 
+        log.info("Map request START url=%s", url)
+        _t0 = time.monotonic()
         try:
-            if _is_pyodide:
+            cached_src = _cache_get(url)
+            if cached_src is not None:
+                map_image.src = cached_src
+                cache_hit = True
+                log.info("Cache HIT (%.1fs) src=%s", time.monotonic() - _t0, cached_src)
+            elif _is_pyodide:
                 map_image.src = url
+                # Browser HTTP-caches the image; record the URL as "seen".
+                _cache_put(url, url)
+                cache_hit = False
             else:
-                async with httpx.AsyncClient() as client:
-                    resp = await client.get(url, timeout=60, follow_redirects=True)
-                    if resp.status_code != 200:
-                        status_text.value = f"Error: HTTP {resp.status_code}"
-                        status_text.color = ft.Colors.RED_400
-                        loading.visible = False
-                        page.update()
-                        return
-                    tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-                    tmp.write(resp.content)
-                    tmp.close()
-                    _temp_files.append(tmp.name)
-                    map_image.src = tmp.name
+                cache_hit = False
+                # The map server can be slow (10-50s) and occasionally drops the
+                # connection, so use a generous timeout and retry a couple of times.
+                import asyncio
+                last_err = None
+                resp = None
+                for attempt in range(3):
+                    _ta = time.monotonic()
+                    try:
+                        log.info("HTTP GET attempt %d/3 (timeout=120s) ...", attempt + 1)
+                        async with httpx.AsyncClient() as client:
+                            resp = await client.get(url, timeout=120, follow_redirects=True)
+                        log.info(
+                            "HTTP GET attempt %d/3 returned status=%s in %.1fs (%d bytes)",
+                            attempt + 1, resp.status_code,
+                            time.monotonic() - _ta, len(resp.content),
+                        )
+                        break
+                    except Exception as ex:
+                        last_err = ex
+                        resp = None
+                        log.warning(
+                            "HTTP GET attempt %d/3 FAILED after %.1fs: %s: %s "
+                            "(connection dropped before a response byte — most "
+                            "likely the ~50s edge gateway timeout while the "
+                            "backend is still rendering)",
+                            attempt + 1, time.monotonic() - _ta,
+                            type(ex).__name__, ex,
+                        )
+                        if attempt < 2:
+                            status_text.value = f"Retrying ({attempt + 2}/3)..."
+                            page.update()
+                            await asyncio.sleep(2)
+                if resp is None:
+                    raise last_err or Exception("Request failed")
+                if resp.status_code != 200:
+                    raise Exception(f"HTTP {resp.status_code}")
+                tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+                tmp.write(resp.content)
+                tmp.close()
+                _temp_files.append(tmp.name)
+                map_image.src = tmp.name
+                _cache_put(url, tmp.name)
 
             map_image.visible = True
             loading.visible = False
-            status_text.value = "Map loaded"
+            result_placeholder.visible = False
+            clear_result_btn.visible = True
+            if cache_hit:
+                status_text.value = "Map rendered (from cache)"
+            else:
+                status_text.value = "Map rendered below"
             status_text.color = ft.Colors.GREEN_700
+            log.info("Map request DONE in %.1fs (cache_hit=%s)",
+                     time.monotonic() - _t0, cache_hit)
         except Exception as ex:
             loading.visible = False
             status_text.value = f"Failed: {ex}"
             status_text.color = ft.Colors.RED_400
+            log.error("Map request FAILED after %.1fs: %s: %s",
+                      time.monotonic() - _t0, type(ex).__name__, ex)
+        finally:
+            loading.visible = False
+            load_btn.disabled = False
 
         page.update()
 
@@ -351,20 +496,29 @@ def OGCMapView(page: ft.Page, map_url: str, collection_title: str, collection_ur
         spacing=4,
     )
 
-    image_container = ft.Container(
+    # Top: interactive map used only for drawing/selecting the bbox.
+    interactive_map_panel = ft.Container(
+        content=the_map,
+        expand=2,
+        bgcolor=ft.Colors.GREY_200,
+    )
+
+    # Bottom: the rendered PNG result (or a placeholder / loading spinner).
+    result_panel = ft.Container(
         content=ft.Stack(
             controls=[
+                ft.Container(content=result_placeholder, alignment=ft.Alignment(0, 0)),
                 map_image,
                 ft.Container(content=loading, alignment=ft.Alignment(0, 0)),
             ],
             expand=True,
         ),
-        expand=True,
-        bgcolor=ft.Colors.GREY_200,
-        border_radius=4,
+        expand=2,
+        bgcolor=ft.Colors.BLACK12,
     )
 
-    # Layout: interactive map on top, controls + result image below
+    # Layout: interactive selection map on top, controls in the middle,
+    # rendered map result at the bottom.
     view = ft.View(
         route="/ogc-map",
         padding=0,
@@ -375,25 +529,31 @@ def OGCMapView(page: ft.Page, map_url: str, collection_title: str, collection_ur
                 spacing=0,
                 controls=[
                     # Interactive map for bbox selection
-                    ft.Container(content=the_map, expand=2),
+                    interactive_map_panel,
                     # Controls panel
                     ft.Container(
                         content=ft.Column(
                             controls=[
                                 controls_row,
-                                ft.Row(controls=[status_text], spacing=8),
+                                ft.Row(
+                                    controls=[status_text, clear_result_btn],
+                                    spacing=8,
+                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                ),
                                 url_row,
-                                ft.Divider(height=1),
-                                image_container,
                             ],
                             spacing=6,
                             scroll=ft.ScrollMode.AUTO,
                         ),
                         padding=ft.Padding.symmetric(horizontal=12, vertical=8),
                         bgcolor=ft.Colors.WHITE,
-                        border=ft.Border(top=ft.BorderSide(1, ft.Colors.GREY_300)),
-                        expand=3,
+                        border=ft.Border(
+                            top=ft.BorderSide(1, ft.Colors.GREY_300),
+                            bottom=ft.BorderSide(1, ft.Colors.GREY_300),
+                        ),
                     ),
+                    # Rendered map result at the bottom
+                    result_panel,
                 ],
             ),
         ],
