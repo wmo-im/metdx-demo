@@ -126,6 +126,25 @@ def OGCMapView(page: ft.Page, map_url: str, collection_title: str, collection_ur
         content_padding=ft.Padding.symmetric(horizontal=8, vertical=4),
     )
 
+    # Vertical level selector. "Surface" (empty key) leaves the request at the
+    # default single surface level; any pressure value is sent to the map
+    # server as an OGC subset expression -- subset=z(<level>) -- which the
+    # polytope maps provider maps to levtype=pl + levelist=<level>.
+    level_dropdown = ft.Dropdown(
+        label="Level (hPa)",
+        width=140,
+        text_size=12,
+        value="",
+        options=[ft.dropdown.Option(key="", text="Surface")] + [
+            ft.dropdown.Option(key=lvl, text=lvl)
+            for lvl in (
+                "1000", "925", "850", "700", "500",
+                "300", "250", "200", "100", "50",
+            )
+        ],
+        content_padding=ft.Padding.symmetric(horizontal=8, vertical=4),
+    )
+
     schema_loading = ft.Text(
         "Loading schema..." if collection_url else "",
         size=11, color=ft.Colors.GREY_500,
@@ -360,6 +379,17 @@ def OGCMapView(page: ft.Page, map_url: str, collection_title: str, collection_ur
             dt = _default_datetime()
             datetime_field.value = dt
         params.append(f"datetime={dt}")
+        # Parameter selection (schema-driven). The map server accepts a
+        # shortname or numeric id via ``parameter-name``.
+        param = (param_dropdown.value or "").strip()
+        if param:
+            params.append(f"parameter-name={param}")
+        # Vertical level. Sent as an OGC subset expression; the maps provider
+        # parses ``z(<level>)`` into levtype=pl + levelist=<level>. Empty means
+        # the default surface level, so no subset is emitted.
+        level = (level_dropdown.value or "").strip()
+        if level:
+            params.append(f"subset=z({level})")
         return f"{base}?{'&'.join(params)}"
 
     async def load_map(e):
@@ -478,7 +508,8 @@ def OGCMapView(page: ft.Page, map_url: str, collection_title: str, collection_ur
 
     controls_row = ft.Row(
         controls=[
-            instance_dropdown, datetime_dropdown, param_dropdown, schema_loading,
+            instance_dropdown, datetime_dropdown, param_dropdown, level_dropdown,
+            schema_loading,
             bbox_field, width_field, height_field, datetime_field,
             draw_bbox_btn, load_btn, clear_btn,
         ],
