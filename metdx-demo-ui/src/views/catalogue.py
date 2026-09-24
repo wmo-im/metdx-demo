@@ -19,7 +19,7 @@ GDC_ENDPOINT = (
 PAGE_SIZE = 10
 
 
-def CatalogueView(page: ft.Page, local_fixture: str | None = None):
+def CatalogueView(page: ft.Page, local_records: list[str] | None = None):
 
     page.theme_mode = ft.ThemeMode.LIGHT
 
@@ -181,11 +181,17 @@ def CatalogueView(page: ft.Page, local_fixture: str | None = None):
     async def _load_results(query: str, offset: int):
         """Fetch a page of results (from live GDC or the local fixture) and render them."""
         try:
-            if local_fixture:
-                with open(local_fixture, "r") as f:
-                    data = json.load(f)
+            if local_records:
+                # Each fixture file is a single OGC record (GeoJSON Feature).
+                # Load them individually and assemble the result list.
+                feats = []
+                for path in local_records:
+                    try:
+                        with open(path, "r") as f:
+                            feats.append(json.load(f))
+                    except (OSError, ValueError):
+                        continue
                 q = (query or "").lower()
-                feats = data.get("features", [])
                 if q:
                     feats = [feat for feat in feats if q in json.dumps(feat).lower()]
                 total = len(feats)
