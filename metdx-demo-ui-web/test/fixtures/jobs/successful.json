@@ -1,0 +1,11 @@
+{
+  "jobID": "job-1",
+  "status": "successful",
+  "links": [
+    {
+      "rel": "results",
+      "href": "/jobs/job-1/results",
+      "type": "application/json"
+    }
+  ]
+}

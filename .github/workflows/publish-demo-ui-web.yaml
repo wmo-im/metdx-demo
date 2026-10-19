@@ -1,0 +1,54 @@
+name: Web UI (React) Build + Deployment to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "metdx-demo-ui-web/**"
+      - ".github/workflows/publish-demo-ui-web.yaml"
+  workflow_dispatch:
+
+# Shared with publish-demo-ui.yaml so the two deployments to gh-pages never run at the same time.
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    defaults:
+      run:
+        working-directory: ./metdx-demo-ui-web
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: metdx-demo-ui-web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build for GitHub Pages
+        run: npm run build:pages
+
+      - name: Deploy to Folder on gh-pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: gh-pages
+          folder: metdx-demo-ui-web/dist
+          target-folder: metdx-demo-ui-web
+          clean: true

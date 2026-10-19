@@ -1,0 +1,19 @@
+{
+  "instances": [
+    {
+      "id": "2026-10-18T12:00:00Z",
+      "title": "2026-10-18T12:00:00Z"
+    },
+    {
+      "id": "2026-10-19T00:00:00Z",
+      "title": "2026-10-19T00:00:00Z"
+    }
+  ],
+  "links": [
+    {
+      "href": "https://polytope-edr.lumi.apps.dte.destination-earth.eu/collections/operational-data/instances",
+      "rel": "self",
+      "type": "application/json"
+    }
+  ]
+}

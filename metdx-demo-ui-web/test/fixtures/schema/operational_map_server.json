@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "title": "Operational map server",
+  "properties": {
+    "geometry": {
+      "x-ogc-role": "primary-geometry",
+      "format": "geometry-any"
+    },
+    "instance_id": {
+      "type": "string",
+      "enum": [
+        "2026-10-18T12:00:00Z",
+        "2026-10-19T00:00:00Z"
+      ]
+    },
+    "datetime": {
+      "type": "string",
+      "format": "date-time",
+      "enum": [
+        "2026-10-19T00:00:00Z",
+        "2026-10-19T06:00:00Z",
+        "2026-10-19T12:00:00Z"
+      ]
+    },
+    "2t": {
+      "title": "2 metre temperature",
+      "type": "number"
+    },
+    "10u": {
+      "title": "10 metre U wind component",
+      "type": "number"
+    },
+    "msl": {
+      "title": "Mean sea level pressure",
+      "type": "number"
+    }
+  }
+}

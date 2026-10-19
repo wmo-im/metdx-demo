@@ -1,0 +1,65 @@
+{
+  "type": "Coverage",
+  "domain": {
+    "type": "Domain",
+    "domainType": "Grid",
+    "axes": {
+      "x": {
+        "values": [
+          9.0,
+          10.0,
+          11.0
+        ]
+      },
+      "y": {
+        "values": [
+          51.0,
+          50.0
+        ]
+      },
+      "t": {
+        "values": [
+          "2026-10-19T00:00:00Z"
+        ]
+      }
+    }
+  },
+  "parameters": {
+    "2t": {
+      "type": "Parameter",
+      "unit": {
+        "symbol": "K"
+      },
+      "observedProperty": {
+        "id": "2t",
+        "label": {
+          "en": "2 metre temperature"
+        }
+      }
+    }
+  },
+  "ranges": {
+    "2t": {
+      "type": "NdArray",
+      "dataType": "float",
+      "axisNames": [
+        "t",
+        "y",
+        "x"
+      ],
+      "shape": [
+        1,
+        2,
+        3
+      ],
+      "values": [
+        280.1,
+        281.0,
+        281.6,
+        282.2,
+        283.0,
+        283.5
+      ]
+    }
+  }
+}

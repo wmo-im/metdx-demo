@@ -1,0 +1,11 @@
+node_modules
+server/node_modules
+dist
+test-results
+playwright-report
+*.tsbuildinfo
+test/e2e
+.git
+Dockerfile
+.dockerignore
+README.md
