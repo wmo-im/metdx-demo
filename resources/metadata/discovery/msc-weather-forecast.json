@@ -1,5 +1,5 @@
 {
-    "id": "1d545467-152e-5fd0-9411-5d33774f7098",
+    "id": "urn:wmo:md:ca-eccc-msc:msc-weather-forecast",
     "conformsTo": [
         "http://wis.wmo.int/spec/wcmp/2/conf/core"
     ],
@@ -34,7 +34,7 @@
         ]
     },
     "properties": {
-        "title": "MSC Weather Forecast [experimental]",
+        "title": "Canadian weather forecast [experimental]",
         "description": "The MSC Weather Forecast provides icons and weather information generated from Canadian numerical weather prediction models, such as probability of precipitation, precipitation type, temperature, feels-like temperature, visibility, wind speed, UV index, and sky condition. This data is produced at various temporal scales to meet public needs by offering users detailed forecasts as hourly, daily, and 7-day outlooks for all locations across Canada.",
         "themes": [
             {
@@ -44,12 +44,21 @@
                     }
                 ],
                 "scheme": "https://canada.multites.net/cst/EAEAD1E6-7DD2-4997-BE7F-40BFB1CBE8A2/CST20230912.rdf"
+            },
+            {
+                "concepts": [
+                    {
+                        "id": "weather"
+                    }
+                ],
+                "scheme": "https://codes.wmo.int/wis/topic-hierarchy/earth-system-discipline"
             }
         ],
         "type": "dataset",
         "language": {
             "code": "en"
         },
+        "wmo:dataPolicy": "core",
         "created": "2026-03-03T00:00:00Z",
         "rights": "Open Government Licence - Canada (https://open.canada.ca/en/open-government-licence-canada)",
         "contacts": [
@@ -62,14 +71,14 @@
                         "city": "Fredericton",
                         "administrativeArea": "New Brunswick",
                         "postalCode": "E3B 6Z4",
-                        "country": "Canada"
+                        "country": "CAN"
                     }
                 ],
                 "roles": [
                     "host"
                 ],
                 "organization": "Government of Canada; Environment and Climate Change Canada; Meteorological Service of Canada",
-                "name": "National Inquiry Response Team / Équipe nationale de réponse des demandes du public",
+                "name": "National Inquiry Response Team / \u00c9quipe nationale de r\u00e9ponse des demandes du public",
                 "position": "National Inquiry Response Team",
                 "hoursOfService": "0700h - 1500h EST",
                 "contactInstructions": "email",
@@ -93,23 +102,16 @@
             }
         ],
         "keywords": [
-            "MetIcons",
             "Point forecast",
-            "WEonG"
+            "Weather Elements on the Grid"
         ]
     },
     "links": [
         {
-            "href": "https://example.com",
-            "type": "text/html",
-            "rel": "items",
-            "title": "MSC Datamart"
-        },
-        {
-            "href": "https://example.com",
-            "type": "text/html",
-            "rel": "items",
-            "title": "MSC Datamart"
+            "rel": "collection",
+            "type": "application/json",
+            "href": "https://example.org/collections/msc-weather-forecast",
+            "title": "Data access via API"
         }
     ],
     "time": null,
