@@ -52,7 +52,7 @@ if (flet.noCdn) {
 _flutter.loader.load({
     config: flutterConfig,
     serviceWorkerSettings: {
-        serviceWorkerVersion: "1384116894",
+        serviceWorkerVersion: "402994369",
     },
     onEntrypointLoaded: async function (engineInitializer) {
         const engine = await engineInitializer.initializeEngine(flutterConfig);
