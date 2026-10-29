@@ -59,7 +59,8 @@
       "ECMWF",
       "IFS",
       "EDR",
-      "OGC Maps"
+      "OGC Maps",
+      "metdx-demo"
     ],
     "themes": [
       {

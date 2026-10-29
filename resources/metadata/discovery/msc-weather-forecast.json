@@ -103,7 +103,8 @@
         ],
         "keywords": [
             "Point forecast",
-            "Weather Elements on the Grid"
+            "Weather Elements on the Grid",
+            "metdx-demo"
         ]
     },
     "links": [
