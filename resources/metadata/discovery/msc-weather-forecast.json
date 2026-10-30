@@ -111,7 +111,7 @@
         {
             "rel": "collection",
             "type": "application/json",
-            "href": "https://example.org/collections/msc-weather-forecast",
+            "href": "https://dev.api.weather.gc.ca/collections/msc-weather-forecast",
             "title": "Data access via API"
         }
     ],

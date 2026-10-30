@@ -86,11 +86,11 @@ services:
       - metdx-demo-net
     <<: *logging
 
-  metdx-demo-ui-web:
-    container_name: metdx-demo-ui-web
+  metdx-demo-ui:
+    container_name: metdx-demo-ui
     build:
-      context: ./metdx-demo-ui-web
-      # Basemap is a build-time setting; defaults to OpenStreetMap (see metdx-demo-ui-web/README.md)
+      context: ./metdx-demo-ui
+      # Basemap is a build-time setting; defaults to OpenStreetMap (see metdx-demo-ui/README.md)
       # args:
       #   VITE_BASEMAP_URL: "https://example.com/{z}/{x}/{y}.png"
       #   VITE_BASEMAP_ATTRIBUTION: "&copy; Example"
@@ -98,7 +98,7 @@ services:
       PORT: "8550"
       STATIC_DIR: /app/dist
       # Upstream hosts the /api/proxy endpoint may call (public hosts must resolve to public IPs)
-      ALLOWED_HOSTS: "wis2-gdc.weather.gc.ca,polytope-edr.lumi.apps.dte.destination-earth.eu"
+      ALLOWED_HOSTS: "wmo-resource-catalogue.labs.wis2dev.io,dev.api.weather.gc.ca,wis2-gdc.weather.gc.ca,polytope-edr.lumi.apps.dte.destination-earth.eu"
       # Internal hosts allowed even though they resolve to private IPs
       TRUSTED_INTERNAL_HOSTS: "metdx-demo-api"
       UPSTREAM_TIMEOUT_MS: "150000"
