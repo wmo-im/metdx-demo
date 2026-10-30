@@ -197,12 +197,13 @@ test.describe('going back from a record to the search', () => {
   });
 });
 
-test('EDR defaults: a single datetime and a corridor height', async ({ page }) => {
+test('EDR defaults: position = first step + 1 day, other modes a single step, and a corridor height', async ({ page }) => {
   await openRecord(page);
   await page.getByRole('link', { name: 'EDR', exact: true }).click();
   await expect(page.getByRole('button', { name: 'position', exact: true })).toBeVisible();
   await expect(page.getByLabel('Start date')).toHaveValue('2026-10-19');
-  await expect(page.getByLabel('End date')).toHaveValue('');
+  await expect(page.getByLabel('End date')).toHaveValue('2026-10-20');
   await page.getByRole('button', { name: 'corridor', exact: true }).click();
+  await expect(page.getByLabel('End date')).toHaveValue('2026-10-19');
   await expect(page.getByLabel('Corridor height (optional)')).toHaveValue('10');
 });

@@ -12,8 +12,10 @@ import type { DrawKind, Geometry } from '../../lib/types';
 import position from '../../../test/fixtures/edr/position.json';
 
 const COL = 'https://polytope-edr.lumi.apps.dte.destination-earth.eu/collections/operational-data';
-/** Default datetime: a single time, the first step of the collection extent. */
+/** Default datetime of every mode but position: a single time, the first step of the collection extent. */
 const DT = '2026-10-19T00:00:00Z';
+/** Default datetime of position (a time series): the first step + 1 day. */
+const DT_POS = `${DT}/2026-10-20T00:00:00Z`;
 const DT_RANGE = '2026-10-19T00:00:00Z/2026-10-29T00:00:00Z';
 
 class StubMap extends MapController {
@@ -134,13 +136,13 @@ describe('EDR page', () => {
     expect(screen.queryByRole('button', { name: /^Draw / })).not.toBeInTheDocument();
   });
 
-  it('prefills a single datetime (first step of the extent), not the whole range, and builds a position URL (Flet format)', async () => {
+  it('position prefills start = first step and end = start + 1 day (not the whole range), and builds a position URL (Flet format)', async () => {
     const user = userEvent.setup();
     renderPage();
     await ready();
     await waitFor(() => expect(screen.getByLabelText('Start date')).toHaveValue('2026-10-19'));
-    expect(screen.getByLabelText('End date')).toHaveValue('');
-    expect(screen.getByLabelText('End time')).toHaveValue('');
+    expect(screen.getByLabelText('End date')).toHaveValue('2026-10-20');
+    expect(screen.getByLabelText('End time')).toHaveValue('00:00');
     expect(screen.getByLabelText('Start time')).toHaveValue('00:00');
     expect(urlBox()).toHaveValue(''); // nothing drawn yet
 
@@ -148,7 +150,7 @@ describe('EDR page', () => {
     await user.click(screen.getByRole('button', { name: 'Draw position' }));
     await waitFor(() =>
       expect(urlBox()).toHaveValue(
-        `${COL}/position?coords=POINT(10.0 50.0)&parameter-name=2t&datetime=${DT}&f=json`,
+        `${COL}/position?coords=POINT(10.0 50.0)&parameter-name=2t&datetime=${DT_POS}&f=json`,
       ),
     );
     expect(map.kinds).toEqual(['point']);
@@ -156,16 +158,90 @@ describe('EDR page', () => {
     expect(screen.getByTestId('edr-geometry')).toHaveTextContent('50.0°N 10.0°E');
   });
 
-  it('the user can still set a range by filling in the end date', async () => {
+  it('the user can still set another range by editing the end date', async () => {
     const user = userEvent.setup();
     renderPage();
     await ready();
     await waitFor(() => expect(screen.getByLabelText('Start date')).toHaveValue('2026-10-19'));
     await user.click(screen.getByRole('button', { name: /^2t/ }));
     await user.click(screen.getByRole('button', { name: 'Draw position' }));
+    await user.clear(screen.getByLabelText('End date'));
     await user.type(screen.getByLabelText('End date'), '2026-10-29');
-    await user.type(screen.getByLabelText('End time'), '00:00');
     await waitFor(() => expect(urlBox().value).toContain(`&datetime=${DT_RANGE}&f=json`));
+  });
+
+  it('changing the mode re-applies its datetime defaults unless the dates were edited', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await ready();
+    await waitFor(() => expect(screen.getByLabelText('End date')).toHaveValue('2026-10-20'));
+    await user.click(screen.getByRole('button', { name: 'area' }));
+    await waitFor(() => expect(screen.getByLabelText('End date')).toHaveValue('2026-10-19'));
+    expect(screen.getByLabelText('End time')).toHaveValue('00:00');
+    await user.click(screen.getByRole('button', { name: 'position' }));
+    await waitFor(() => expect(screen.getByLabelText('End date')).toHaveValue('2026-10-20'));
+
+    // once edited, a mode change keeps the user's dates
+    await user.clear(screen.getByLabelText('End date'));
+    await user.type(screen.getByLabelText('End date'), '2026-10-25');
+    await user.click(screen.getByRole('button', { name: 'cube' }));
+    expect(screen.getByLabelText('End date')).toHaveValue('2026-10-25');
+    expect(screen.getByLabelText('Start date')).toHaveValue('2026-10-19');
+  });
+
+  it('start == end sends a single datetime (not start/start)', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await ready();
+    await user.click(screen.getByRole('button', { name: /^2t/ }));
+    await user.click(screen.getByRole('button', { name: 'area' }));
+    await waitFor(() => expect(screen.getByLabelText('End date')).toHaveValue('2026-10-19'));
+    map.next = {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [-10, 40.25],
+          [20.5, 40.25],
+          [20.5, 60],
+          [-10, 60],
+          [-10, 40.25],
+        ],
+      ],
+    };
+    await user.click(screen.getByRole('button', { name: 'Draw area' }));
+    await waitFor(() => expect(urlBox().value).toContain(`&datetime=${DT}&f=json`));
+    expect(urlBox().value).not.toContain(`${DT}/`);
+  });
+
+  it('switching instance re-applies the defaults, dropping edited dates', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await ready();
+    await waitFor(() => expect(screen.getByLabelText('End date')).toHaveValue('2026-10-20'));
+    await user.clear(screen.getByLabelText('End date'));
+    await user.type(screen.getByLabelText('End date'), '2026-10-25');
+    await user.click(await screen.findByRole('checkbox', { name: /Use specific instance/ }));
+    await waitFor(() => expect(screen.getByText(/Valid range: from 2026-10-19T00:00/)).toBeInTheDocument());
+    expect(screen.getByLabelText('End date')).toHaveValue('2026-10-20');
+  });
+
+  it('does not list `instances` among the advertised-but-unsupported query types', async () => {
+    const real = createMockFetch();
+    const withInstances: FetchImpl = async (input, init) => {
+      const u = unproxyUrl(input);
+      if (u.startsWith('https://other.example/collections/c?')) {
+        return new Response(
+          JSON.stringify({ id: 'c', title: 'T', data_queries: { position: {}, instances: {}, items: {} }, parameter_names: { a: {} } }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (u.startsWith('https://other.example/')) return new Response('{}', { status: 404, headers: { 'content-type': 'application/json' } });
+      return real(input, init);
+    };
+    renderPage('https://other.example/collections/c', withInstances);
+    const note = await screen.findByText(/Also advertised/);
+    expect(note).toHaveTextContent('items');
+    expect(note).not.toHaveTextContent('instances');
   });
 
   it('area mode: a drawn rectangle becomes a POLYGON query', async () => {
@@ -244,10 +320,10 @@ describe('EDR page', () => {
     );
     await waitFor(() => expect(mock.calls).toContain(`${COL}/instances/2026-10-18T12:00:00Z?f=json`));
     await waitFor(() => expect(screen.getByText(/Valid range: from 2026-10-19T00:00/)).toBeInTheDocument());
-    // the instance's first step is the default single time (any range typed before is dropped)
+    // the instance's first step (+ 1 day for position) is the default (any range typed before is dropped)
     expect(screen.getByLabelText('Start date')).toHaveValue('2026-10-19');
-    expect(screen.getByLabelText('End date')).toHaveValue('');
-    expect(urlBox().value).toContain(`&datetime=${DT}&f=json`);
+    expect(screen.getByLabelText('End date')).toHaveValue('2026-10-20');
+    expect(urlBox().value).toContain(`&datetime=${DT_POS}&f=json`);
     await user.click(screen.getByRole('checkbox', { name: /Use specific instance/ }));
     await waitFor(() => expect(urlBox().value).toContain(`${COL}/position?`));
     await waitFor(() => expect(screen.getByText(/Available: from/)).toBeInTheDocument());
@@ -288,7 +364,7 @@ describe('EDR page', () => {
     expect(JSON.parse(within(dialog).getByTestId('result-json').textContent ?? '')).toEqual(position);
     expect(within(dialog).getByRole('button', { name: /download/i })).toBeInTheDocument();
     expect(queryCalls()).toEqual([
-      `${COL}/position?coords=POINT(10.0 50.0)&parameter-name=2t&datetime=${DT}&f=json`,
+      `${COL}/position?coords=POINT(10.0 50.0)&parameter-name=2t&datetime=${DT_POS}&f=json`,
     ]);
     expect(screen.getByTestId('edr-status')).toHaveTextContent(/Response received/);
   });
@@ -304,7 +380,7 @@ describe('EDR page', () => {
     await user.click(fetchBtn());
     await screen.findByRole('dialog');
     expect(queryCalls()).toEqual([
-      `${COL}/position?coords=POINT(10.0 50.0)&parameter-name=2t&datetime=${DT}&f=json&extra=1`,
+      `${COL}/position?coords=POINT(10.0 50.0)&parameter-name=2t&datetime=${DT_POS}&f=json&extra=1`,
     ]);
   });
 

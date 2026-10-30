@@ -127,7 +127,7 @@ describe('catalogue -> record (recordsSource catalogue, mock fixtures)', () => {
     const mock = createMockFetch();
     setFetchImpl(mock);
     renderApp(`/record/${encodeURIComponent('urn:wmo:md:int-ecmwf:opendata')}`);
-    expect(await screen.findByText(/ECMWF Open Data/)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /ECMWF Open Data/ })).toBeInTheDocument();
     expect(mock.calls.some((u) => u.includes('/items/urn%3Awmo%3Amd%3Aint-ecmwf%3Aopendata'))).toBe(true);
   });
 
@@ -308,11 +308,22 @@ describe('catalogue with the local records', () => {
     const mock = createMockFetch();
     setFetchImpl(mock);
     const { unmount } = renderApp(`/record/${encodeURIComponent(RECORD_ID)}`);
-    expect(await screen.findByText(/ECMWF Open Data/)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /ECMWF Open Data/ })).toBeInTheDocument();
     expect(mock.calls.some((u) => u.includes('wis2-discovery-metadata'))).toBe(false);
     unmount();
     clearRecordCache();
     renderApp('/record/nope');
     expect(await screen.findByText(/not found in the local records/i)).toBeInTheDocument();
+  });
+
+  it('the record page lists the record links (data, ...) opening in a new tab', async () => {
+    setFetchImpl(createMockFetch());
+    renderApp(`/record/${encodeURIComponent(RECORD_ID)}`);
+    const links = await screen.findByTestId('record-links');
+    const a = within(links).getByRole('link', { name: 'ECMWF Open Data portal' });
+    expect(a).toHaveAttribute('href', 'https://data.ecmwf.int/');
+    expect(a).toHaveAttribute('target', '_blank');
+    expect(a.getAttribute('rel')).toContain('noopener');
+    expect(within(links).getByText('data')).toBeInTheDocument();
   });
 });

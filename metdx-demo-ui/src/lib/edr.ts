@@ -290,8 +290,42 @@ export function combineDatetime(
 ): string | null {
   const start = makeIso(startDate, startTime);
   const end = makeIso(endDate, endTime);
-  if (start && end) return `${start}/${end}`;
+  // start == end: a single time (`datetime=<start>`), so exactly one step is retrieved.
+  if (start && end && start !== end) return `${start}/${end}`;
   return start;
+}
+
+export interface DatetimeFields {
+  startDate: string;
+  startTime: string;
+  endDate: string;
+  endTime: string;
+}
+
+const DAY_MS = 24 * 3600 * 1000;
+
+/**
+ * Default start/end fields for a query type, from the available temporal extent
+ * (`start` overrides the extent's start, e.g. today when the extent has none).
+ * - position (time series): start = first step, end = start + 1 day, clamped to the extent's end;
+ * - every other type: end = start, so a single step is retrieved.
+ * Returns `null` when there is no start to default from.
+ */
+export function defaultDatetime(mode: EdrMode, temporal: TemporalExtent, start?: string | null): DatetimeFields | null {
+  const first = temporal.start ?? start ?? null;
+  if (!first) return null;
+  const s = splitIso(first);
+  const fields: DatetimeFields = { startDate: s.date, startTime: s.time, endDate: s.date, endTime: s.time };
+  if (mode !== 'position') return fields;
+  const t0 = Date.parse(makeIso(s.date, s.time) ?? '');
+  if (Number.isNaN(t0)) return fields;
+  let t1 = t0 + DAY_MS;
+  if (temporal.end) {
+    const tEnd = Date.parse(temporal.end);
+    if (!Number.isNaN(tEnd)) t1 = Math.max(t0, Math.min(t1, tEnd));
+  }
+  const e = splitIso(new Date(t1).toISOString());
+  return { ...fields, endDate: e.date, endTime: e.time };
 }
 
 /** ISO timestamp -> `{date, time}` text-field values (`time` defaults to `00:00`). */
@@ -357,7 +391,8 @@ export function parseCollection(data: unknown): EdrCollectionInfo {
   const d = (data ?? {}) as Json;
   const queries = Object.keys((d.data_queries ?? {}) as Json);
   const modes = EDR_MODES.filter((m) => queries.includes(m));
-  const unknownQueries = queries.filter((q) => !isEdrMode(q));
+  // `instances` is not a query type (it only advertises the instance list).
+  const unknownQueries = queries.filter((q) => !isEdrMode(q) && q !== 'instances');
   const params: EdrParam[] = Object.entries((d.parameter_names ?? {}) as Record<string, Json>).map(([id, p]) => ({
     id,
     name: p?.observedProperty?.label?.en ?? id,

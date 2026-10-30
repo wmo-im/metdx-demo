@@ -39,6 +39,7 @@ import {
   collectionBase,
   collectionJsonUrl,
   combineDatetime,
+  defaultDatetime,
   describePoints,
   geometryToPoints,
   instanceUrl,
@@ -51,7 +52,6 @@ import {
   parseTemporal,
   parseTimeSeries,
   queryGeometry,
-  splitIso,
   type EdrCollectionInfo,
   type EdrMode,
   type TemporalExtent,
@@ -167,25 +167,42 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
 
   const effectiveInstance = useInstance && instanceId ? instanceId : null;
 
+  // The extent the date fields default from (collection or instance), and whether the user has typed in them.
+  const [base, setBase] = useState<{ t: TemporalExtent; fallbackToday: boolean } | null>(null);
+  const datesEdited = useRef(false);
+
+  // A new extent (collection load, instance switch) re-applies the defaults, dropping earlier edits.
   const applyTemporal = useCallback((t: TemporalExtent, label: string, fallbackToday: boolean) => {
     const parts: string[] = [];
     if (t.start) parts.push(`from ${t.start.slice(0, 16)}`);
     if (t.end) parts.push(`to ${t.end.slice(0, 16)}`);
     else if (t.start) parts.push('to now');
     setDtHint(parts.length ? `${label}: ${parts.join(' ')}` : '');
-    if (t.start) {
-      const s = splitIso(t.start);
-      setStartDate(s.date);
-      setStartTime(s.time);
-    } else if (fallbackToday) {
-      setStartDate(new Date().toISOString().slice(0, 10));
-      setStartTime('00:00');
-    }
-    // Default to a single time (the first available step): the whole extent can be hundreds of MB.
-    // The user can still fill in an end date/time to query a range.
-    setEndDate('');
-    setEndTime('');
+    datesEdited.current = false;
+    setBase({ t, fallbackToday });
   }, []);
+
+  // Defaults per query type (a whole extent can be hundreds of MB): position = first step + 1 day (a time
+  // series), everything else = the first step only. Changing the mode re-applies them unless the user edited the dates.
+  useEffect(() => {
+    if (!base || datesEdited.current) return;
+    const today = base.fallbackToday ? `${new Date().toISOString().slice(0, 10)}T00:00:00Z` : null;
+    const d = defaultDatetime(mode, base.t, today);
+    if (d) {
+      setStartDate(d.startDate);
+      setStartTime(d.startTime);
+      setEndDate(d.endDate);
+      setEndTime(d.endTime);
+    } else {
+      setEndDate('');
+      setEndTime('');
+    }
+  }, [base, mode]);
+
+  const editDate = (set: (v: string) => void) => (e: { target: { value: string } }) => {
+    datesEdited.current = true;
+    set(e.target.value);
+  };
 
   // Collection document + instance list (loaded once per collection).
   useEffect(() => {
@@ -654,15 +671,17 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
           </Typography>
         )}
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-          Starts with a single time (the first available step). Fill in the end date to query a range.
+          {mode === 'position'
+            ? 'Starts with the first available step and the following day. Edit the dates to query another range.'
+            : 'Starts with a single time (the first available step). Set a later end to query a range.'}
         </Typography>
         <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
-          <TextField size="small" label="Start date" placeholder="YYYY-MM-DD" value={startDate} onChange={(e) => setStartDate(e.target.value)} sx={{ flex: 2 }} />
-          <TextField size="small" label="Start time" placeholder="HH:MM" value={startTime} onChange={(e) => setStartTime(e.target.value)} sx={{ flex: 1 }} />
+          <TextField size="small" label="Start date" placeholder="YYYY-MM-DD" value={startDate} onChange={editDate(setStartDate)} sx={{ flex: 2 }} />
+          <TextField size="small" label="Start time" placeholder="HH:MM" value={startTime} onChange={editDate(setStartTime)} sx={{ flex: 1 }} />
         </Stack>
         <Stack direction="row" spacing={1}>
-          <TextField size="small" label="End date" placeholder="YYYY-MM-DD" value={endDate} onChange={(e) => setEndDate(e.target.value)} sx={{ flex: 2 }} />
-          <TextField size="small" label="End time" placeholder="HH:MM" value={endTime} onChange={(e) => setEndTime(e.target.value)} sx={{ flex: 1 }} />
+          <TextField size="small" label="End date" placeholder="YYYY-MM-DD" value={endDate} onChange={editDate(setEndDate)} sx={{ flex: 2 }} />
+          <TextField size="small" label="End time" placeholder="HH:MM" value={endTime} onChange={editDate(setEndTime)} sx={{ flex: 1 }} />
         </Stack>
       </Section>
 

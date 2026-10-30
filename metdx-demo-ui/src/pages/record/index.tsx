@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { Link as RouterLink, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { Alert, Box, Button, Chip, CircularProgress, Divider, IconButton, Stack, Tooltip, Typography } from '@mui/material';
+import { Alert, Box, Button, Chip, CircularProgress, Divider, IconButton, Link, Stack, Tooltip, Typography } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import BusinessIcon from '@mui/icons-material/Business';
 import PolicyIcon from '@mui/icons-material/Policy';
@@ -70,6 +70,8 @@ export default function RecordPage() {
   }
 
   const m = recordMeta(record);
+  // Everything but `self` (the record's own URL).
+  const links = (record.links ?? []).filter((l) => !!l.href && l.rel !== 'self');
   const recId = record.id;
   const checking = !services;
   const edrCol = services?.edrCollection;
@@ -116,6 +118,27 @@ export default function RecordPage() {
         {m.phone && <MetaRow icon={<PhoneIcon fontSize="inherit" />} label="Phone" value={m.phone} />}
       </Stack>
       <Divider sx={{ my: 1 }} />
+
+      {links.length > 0 && (
+        <>
+          <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+            Links
+          </Typography>
+          <Stack component="ul" spacing={0.5} sx={{ m: 0, pl: 2.5 }} data-testid="record-links">
+            {links.map((l, i) => (
+              <Typography component="li" variant="body2" key={`${l.rel}-${l.href}-${i}`} sx={{ wordBreak: 'break-word' }}>
+                <Link href={l.href} target="_blank" rel="noopener noreferrer">
+                  {l.title || l.href}
+                </Link>
+                {l.rel && (
+                  <Chip size="small" label={l.rel} sx={{ ml: 0.75, height: 18, fontSize: 10 }} data-testid="record-link-rel" />
+                )}
+              </Typography>
+            ))}
+          </Stack>
+          <Divider sx={{ my: 1 }} />
+        </>
+      )}
 
       <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
         Data Access

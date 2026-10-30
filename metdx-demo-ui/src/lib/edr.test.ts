@@ -5,6 +5,7 @@ import {
   collectionBase,
   collectionJsonUrl,
   combineDatetime,
+  defaultDatetime,
   DEFAULT_CORRIDOR_HEIGHT,
   HEIGHT_UNITS,
   describePoints,
@@ -216,6 +217,31 @@ describe('datetime helpers', () => {
     expect(combineDatetime('2026-10-19', '00:00', '2026-10-20', '12:00')).toBe('2026-10-19T00:00:00Z/2026-10-20T12:00:00Z');
     expect(combineDatetime('2026-10-19', '00:00', '', '')).toBe('2026-10-19T00:00:00Z');
     expect(combineDatetime('', '', '2026-10-20', '')).toBeNull();
+  });
+  it('combineDatetime: start == end is a single datetime', () => {
+    expect(combineDatetime('2026-10-19', '06:00', '2026-10-19', '06:00')).toBe('2026-10-19T06:00:00Z');
+    expect(combineDatetime('2026-10-19', '', '2026-10-19', '00:00')).toBe('2026-10-19T00:00:00Z');
+  });
+  it('defaultDatetime: position = start + 1 day clamped to the extent end; other modes = start', () => {
+    const t = { start: '2026-10-19T06:00:00Z', end: '2026-10-29T00:00:00Z' };
+    expect(defaultDatetime('position', t)).toEqual({ startDate: '2026-10-19', startTime: '06:00', endDate: '2026-10-20', endTime: '06:00' });
+    expect(defaultDatetime('position', { ...t, end: '2026-10-19T18:00:00Z' })).toEqual({
+      startDate: '2026-10-19',
+      startTime: '06:00',
+      endDate: '2026-10-19',
+      endTime: '18:00',
+    });
+    expect(defaultDatetime('position', { start: '2026-10-19T00:00:00Z', end: null })?.endDate).toBe('2026-10-20');
+    for (const m of ['area', 'trajectory', 'radius', 'corridor', 'cube'] as const) {
+      expect(defaultDatetime(m, t)).toEqual({ startDate: '2026-10-19', startTime: '06:00', endDate: '2026-10-19', endTime: '06:00' });
+    }
+    expect(defaultDatetime('area', { start: null, end: null })).toBeNull();
+    expect(defaultDatetime('area', { start: null, end: null }, '2026-01-02T00:00:00Z')?.startDate).toBe('2026-01-02');
+  });
+  it('parseCollection hides `instances` from the unknown query types', () => {
+    const c = parseCollection({ data_queries: { position: {}, instances: {}, items: {}, locations: {} } });
+    expect(c.modes).toEqual(['position']);
+    expect(c.unknownQueries).toEqual(['items', 'locations']);
   });
   it('splitIso', () => {
     expect(splitIso('2026-10-19T06:30:00Z')).toEqual({ date: '2026-10-19', time: '06:30' });
