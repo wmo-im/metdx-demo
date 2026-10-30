@@ -1,1 +1,0 @@
-const t=[{id:"2026-10-18T12:00:00Z",title:"2026-10-18T12:00:00Z"},{id:"2026-10-19T00:00:00Z",title:"2026-10-19T00:00:00Z"}],e=[{href:"https://polytope-edr.lumi.apps.dte.destination-earth.eu/collections/operational-data/instances",rel:"self",type:"application/json"}],a={instances:t,links:e};export{a as default,t as instances,e as links};
