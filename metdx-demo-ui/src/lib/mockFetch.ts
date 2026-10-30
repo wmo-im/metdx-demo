@@ -9,7 +9,8 @@
  *
  * Fixtures: records/*.json (search + item lookup), collections/<id>.json,
  * instances/<col>.json (+ <col>.instance.json for any instance id),
- * schema/<col>.json, edr/<query-type>.json (falls back to position.json),
+ * schema/<col>.json, edr/<query-type>.json (falls back to position.json; area/trajectory/corridor/cube use
+ * edr/live-*.json, see LIVE_FIXTURE),
  * jobs/running.json + jobs/successful.json, maps/map.png.
  *
  * Behaviour switches (query params of the upstream URL):
@@ -53,6 +54,18 @@ async function loadAllRecords(): Promise<Record<string, any>[]> {
     .sort();
   return Promise.all(names.map((n) => jsonFixtures[n]() as Promise<Record<string, any>>));
 }
+
+/**
+ * EDR query types answered with a full live ECMWF sample (test/fixtures/edr/live-*.json); the others use
+ * `edr/<type>.json`, else position.json. Corridor reuses the trajectory sample and cube the area sample
+ * (no live sample for them). Position keeps the small hand-made series.
+ */
+const LIVE_FIXTURE: Record<string, string> = {
+  area: 'live-area',
+  trajectory: 'live-trajectory',
+  corridor: 'live-trajectory',
+  cube: 'live-area',
+};
 
 export interface MockOptions {
   /** Artificial latency per request (ms). */
@@ -167,7 +180,8 @@ export function createMockFetch(opts: MockOptions = {}): MockFetch {
         if (q.get('async') === 'true') {
           return jsonResponse({ status: 303, location: proxyUrl(`${origin}/jobs/job-1`) });
         }
-        const doc = (await loadJson(`edr/${queryType}.json`)) ?? (await loadJson('edr/position.json'));
+        const doc =
+          (await loadJson(`edr/${LIVE_FIXTURE[queryType] ?? queryType}.json`)) ?? (await loadJson('edr/position.json'));
         return jsonResponse(doc);
       }
     }

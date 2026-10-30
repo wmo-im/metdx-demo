@@ -9,13 +9,16 @@
     "build:pages": "tsc -b && node scripts/build-pages.mjs",
     "preview": "vite preview",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "playwright test --project=mock",
+    "e2e:live": "E2E_LIVE=1 playwright test --project=live --workers=1"
   },
   "dependencies": {
     "@emotion/react": "^11.13.5",
     "@emotion/styled": "^11.13.5",
     "@mui/icons-material": "^6.1.10",
     "@mui/material": "^6.1.10",
+    "d3-contour": "^4.0.2",
+    "d3-delaunay": "^6.0.4",
     "ol": "^10.3.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -26,6 +29,8 @@
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
     "@testing-library/user-event": "^14.5.2",
+    "@types/d3-contour": "^3.0.6",
+    "@types/d3-delaunay": "^6.0.4",
     "@types/node": "^22.10.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",

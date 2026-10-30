@@ -9,6 +9,7 @@ import { setFetchImpl, unproxyUrl, type FetchImpl } from '../../lib/http';
 import { EDR_JOB } from '../../lib/edr';
 import { createMockFetch, type MockFetch } from '../../lib/mockFetch';
 import type { DrawKind, Geometry } from '../../lib/types';
+import type { DataLayer, DataSelectHandler, ShowDataOptions } from '../../lib/covjsonTypes';
 import position from '../../../test/fixtures/edr/position.json';
 
 const COL = 'https://polytope-edr.lumi.apps.dte.destination-earth.eu/collections/operational-data';
@@ -29,6 +30,24 @@ class StubMap extends MapController {
   showGeometry(g: Geometry | null): void {
     this.shown.push(g);
     super.showGeometry(g);
+  }
+  // Data drawing is recorded, not rendered (jsdom has no canvas / WebGL).
+  drawn: DataLayer[] = [];
+  drawnOpts: ShowDataOptions[] = [];
+  dataClears = 0;
+  showData(layer: DataLayer, opts: ShowDataOptions): void {
+    this.drawn.push(layer);
+    this.drawnOpts.push(opts);
+  }
+  clearData(): void {
+    this.dataClears++;
+  }
+  selectCb: DataSelectHandler | null = null;
+  onDataSelect(cb: DataSelectHandler): () => void {
+    this.selectCb = cb;
+    return () => {
+      if (this.selectCb === cb) this.selectCb = null;
+    };
   }
 }
 
@@ -271,6 +290,55 @@ describe('EDR page', () => {
     expect(map.kinds).toEqual(['bbox']);
   });
 
+  it('area mode: Rectangle is the default; Polygon draws a free polygon (vertex count shown) and cube stays a bbox', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await ready();
+    await user.click(screen.getByRole('button', { name: /^2t/ }));
+    expect(screen.queryByTestId('edr-area-shape')).toBeNull(); // position: no shape choice
+    await user.click(screen.getByRole('button', { name: 'area' }));
+    const toggle = screen.getByTestId('edr-area-shape');
+    expect(within(toggle).getByRole('button', { name: 'rectangle' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(within(toggle).getByRole('button', { name: 'polygon' }));
+    expect(within(toggle).getByRole('button', { name: 'polygon' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText(/double-click to finish/)).toBeInTheDocument();
+
+    map.next = {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [0, 40],
+          [10, 40],
+          [10, 50],
+          [5, 45.55555],
+          [0, 50],
+          [0, 40],
+        ],
+      ],
+    };
+    await user.click(screen.getByRole('button', { name: 'Draw area' }));
+    await waitFor(() =>
+      expect(urlBox()).toHaveValue(
+        `${COL}/area?coords=POLYGON((0.0 40.0,10.0 40.0,10.0 50.0,5.0 45.556,0.0 50.0,0.0 40.0))&parameter-name=2t&datetime=${DT}&f=json`,
+      ),
+    );
+    expect(map.kinds).toEqual(['polygon']);
+    expect(screen.getByTestId('edr-geometry')).toHaveTextContent('Polygon with 5 vertices');
+    expect(map.shown[map.shown.length - 1]).toMatchObject({ type: 'Polygon' });
+
+    // switching the shape drops the drawing; rectangle draws a bbox again
+    await user.click(within(toggle).getByRole('button', { name: 'rectangle' }));
+    expect(urlBox()).toHaveValue('');
+    await user.click(screen.getByRole('button', { name: 'Draw area' }));
+    expect(map.kinds).toEqual(['polygon', 'bbox']);
+
+    // cube: bbox only, no shape choice
+    await user.click(screen.getByRole('button', { name: 'cube' }));
+    expect(screen.queryByTestId('edr-area-shape')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Draw cube' }));
+    expect(map.kinds).toEqual(['polygon', 'bbox', 'bbox']);
+  });
+
   it('switching mode clears the drawing and URL; Clear does too', async () => {
     const user = userEvent.setup();
     renderPage();
@@ -359,6 +427,9 @@ describe('EDR page', () => {
     await user.click(screen.getByRole('button', { name: 'Draw position' }));
     await waitFor(() => expect(fetchBtn()).toBeEnabled());
     await user.click(fetchBtn());
+    await screen.findByTestId('edr-result');
+    expect(screen.queryByRole('dialog')).toBeNull(); // the JSON is opened on demand
+    await user.click(screen.getByRole('button', { name: 'View JSON' }));
     const dialog = await screen.findByRole('dialog');
     expect(await within(dialog).findByTestId('result-json')).toHaveTextContent('"type": "Coverage"');
     expect(JSON.parse(within(dialog).getByTestId('result-json').textContent ?? '')).toEqual(position);
@@ -378,7 +449,7 @@ describe('EDR page', () => {
     await waitFor(() => expect(fetchBtn()).toBeEnabled());
     await user.type(urlBox(), '&extra=1');
     await user.click(fetchBtn());
-    await screen.findByRole('dialog');
+    await screen.findByTestId('edr-result');
     expect(queryCalls()).toEqual([
       `${COL}/position?coords=POINT(10.0 50.0)&parameter-name=2t&datetime=${DT_POS}&f=json&extra=1`,
     ]);
@@ -650,7 +721,7 @@ describe('EDR page', () => {
       Object.assign(EDR_JOB, oldJob);
     });
 
-    it('a point series response shows a chart above the JSON', async () => {
+    it('a point series response shows its chart in the result panel', async () => {
       const user = userEvent.setup();
       renderPage();
       await ready();
@@ -658,8 +729,9 @@ describe('EDR page', () => {
       await user.click(screen.getByRole('button', { name: 'Draw position' }));
       await waitFor(() => expect(fetchBtn()).toBeEnabled());
       await user.click(fetchBtn());
-      const dialog = await screen.findByRole('dialog');
-      const chart = await within(dialog).findByTestId('chart-2t');
+      const panel = await screen.findByTestId('edr-result');
+      expect(screen.queryByRole('dialog')).toBeNull();
+      const chart = await within(panel).findByTestId('chart-2t');
       expect(chart).toHaveTextContent('2 metre temperature (K)');
       expect(chart.querySelectorAll('circle')).toHaveLength(4);
       expect(chart.querySelectorAll('polyline')).toHaveLength(1);
@@ -675,9 +747,11 @@ describe('EDR page', () => {
       await user.type(urlBox(), '&async=true');
       await user.click(fetchBtn());
 
+      const panel = await screen.findByTestId('edr-result');
+      expect(within(panel).getByTestId('chart-2t')).toBeInTheDocument();
+      await user.click(within(panel).getByRole('button', { name: 'View JSON' }));
       const dialog = await screen.findByRole('dialog');
       expect(await within(dialog).findByTestId('result-json')).toHaveTextContent('"type": "Coverage"');
-      expect(within(dialog).getByTestId('chart-2t')).toBeInTheDocument();
       expect(JSON.parse(within(dialog).getByTestId('result-json').textContent ?? '')).toEqual(position);
 
       const origin = 'https://polytope-edr.lumi.apps.dte.destination-earth.eu';

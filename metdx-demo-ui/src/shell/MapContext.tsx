@@ -3,6 +3,8 @@ import { MapController, type MapApi } from './mapController';
 
 export type { MapApi } from './mapController';
 export { DrawCancelledError } from './mapController';
+export type { DataLayer, DataSelectHandler, ShowDataOptions, ColourScale, ParamInfo, GridSpec, LegendProps } from '../lib/covjsonTypes';
+export { TooLargeToDraw, MAX_POINTS, MAX_GRID_CELLS, MAX_CANVAS_DIM, DEFAULT_COLOUR_SCALE } from '../lib/covjsonTypes';
 
 const Ctx = createContext<MapController | null>(null);
 

@@ -9,6 +9,7 @@ import {
   DEFAULT_CORRIDOR_HEIGHT,
   HEIGHT_UNITS,
   describePoints,
+  drawKindFor,
   geometryToPoints,
   instanceUrl,
   instancesUrl,
@@ -79,6 +80,38 @@ describe('buildEdrUrl matches the Flet output', () => {
     ).toBe(
       `${COL}/area?coords=POLYGON((-10.0 40.25,20.5 40.25,20.5 60.0,-10.0 60.0,-10.0 40.25))&parameter-name=2t,10u&datetime=${DT}&f=json`,
     );
+  });
+
+  it('area as a free polygon: a closed ring in lon lat order, 3-decimal coordinates', () => {
+    const tri: [number, number][] = [
+      [-10, 40],
+      [20.12345, 41.5],
+      [5, 60],
+    ];
+    const expected = `${COL}/area?coords=POLYGON((-10.0 40.0,20.123 41.5,5.0 60.0,-10.0 40.0))&parameter-name=2t&datetime=${DT}&f=json`;
+    expect(buildEdrUrl(q({ mode: 'area', areaShape: 'polygon', points: tri, params: ['2t'], datetime: DT }))).toBe(expected);
+    // an already closed ring and repeated vertices (a double-click) give the same polygon
+    expect(
+      buildEdrUrl(q({ mode: 'area', areaShape: 'polygon', points: [tri[0], tri[1], tri[1], tri[2], tri[0]], params: ['2t'], datetime: DT })),
+    ).toBe(expected);
+    // not a bounding box: an L shape keeps its six vertices
+    const l: [number, number][] = [[0, 0], [4, 0], [4, 1], [1, 1], [1, 3], [0, 3]];
+    expect(buildEdrUrl(q({ mode: 'area', areaShape: 'polygon', points: l }))).toContain(
+      'coords=POLYGON((0.0 0.0,4.0 0.0,4.0 1.0,1.0 1.0,1.0 3.0,0.0 3.0,0.0 0.0))',
+    );
+    // fewer than 3 distinct vertices is not a polygon yet
+    expect(buildEdrUrl(q({ mode: 'area', areaShape: 'polygon', points: [tri[0], tri[1]] }))).toBeNull();
+    expect(buildEdrUrl(q({ mode: 'area', areaShape: 'polygon', points: [tri[0], tri[0], tri[0]] }))).toBeNull();
+    // the rectangle (default) is unchanged, and cube stays a bbox whatever the shape
+    expect(buildEdrUrl(q({ mode: 'cube', areaShape: 'polygon', points: [[1, 2], [5, 6]] }))).toContain('/cube?bbox=1.0,2.0,5.0,6.0');
+  });
+
+  it('drawKindFor: only area can be drawn as a polygon', () => {
+    expect(drawKindFor('area')).toBe('bbox');
+    expect(drawKindFor('area', 'rectangle')).toBe('bbox');
+    expect(drawKindFor('area', 'polygon')).toBe('polygon');
+    expect(drawKindFor('cube', 'polygon')).toBe('bbox');
+    expect(drawKindFor('trajectory', 'polygon')).toBe('line');
   });
 
   it('trajectory', () => {
@@ -303,6 +336,17 @@ describe('geometry helpers', () => {
       [5, 6],
     ]);
   });
+  it('polygon areas keep their vertices (open ring) and show them', () => {
+    const ring: [number, number][] = [[0, 0], [4, 0.0004], [4, 1], [0, 0]];
+    expect(geometryToPoints('area', { type: 'Polygon', coordinates: [ring] }, 'polygon')).toEqual([[0, 0], [4, 0], [4, 1]]);
+    expect(queryGeometry('area', [[0, 0], [4, 0], [4, 1]], 'polygon')).toEqual({
+      type: 'Polygon',
+      coordinates: [[[0, 0], [4, 0], [4, 1], [0, 0]]],
+    });
+    expect(describePoints([[0, 0], [4, 0], [4, 1]], 'area', 'polygon')).toBe('Polygon with 3 vertices');
+    expect(describePoints([[0, 0], [4, 1]], 'area', 'rectangle')).toBe('0.0°N 0.0°E → 1.0°N 4.0°E');
+  });
+
   it('describePoints', () => {
     expect(describePoints([])).toBe('Nothing drawn yet');
     expect(describePoints([[10, 50]])).toBe('50.0°N 10.0°E');

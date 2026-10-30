@@ -21,6 +21,15 @@ async function mapBox(page: Page) {
   return box;
 }
 
+/**
+ * Let the live OSM basemap tiles load before a screenshot: best effort and BOUNDED. A bare
+ * `waitForLoadState('networkidle')` has no timeout of its own (it runs up to the test's 30 s), so with slow/offline
+ * tile requests (or many parallel workers) it ate the whole test budget and the test failed with a timeout.
+ */
+async function settleBasemap(page: Page) {
+  await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {});
+}
+
 test.beforeAll(() => mkdirSync(SCREENS, { recursive: true }));
 
 test('catalogue lists the default-query records with service badges', async ({ page }) => {
@@ -37,7 +46,7 @@ test('catalogue lists the default-query records with service badges', async ({ p
   await expect(msc.getByTestId('badge-edr')).toHaveCount(0);
   await expect(msc.getByTestId('badge-maps')).toHaveCount(0);
   await expect(page.getByTestId('map').locator('canvas')).toBeVisible();
-  await page.waitForLoadState('networkidle').catch(() => {}); // basemap tiles (best effort; may be offline)
+  await settleBasemap(page);
   await page.screenshot({ path: `${SCREENS}/catalogue.png` });
 });
 
@@ -100,14 +109,16 @@ test('search -> record -> EDR -> draw point -> Fetch shows JSON and chart', asyn
   await expect(page.getByLabel('Request URL')).toHaveValue(/parameter-name=/);
 
   await page.mouse.move(0, 0);
-  await page.waitForLoadState('networkidle').catch(() => {});
+  await settleBasemap(page);
   await page.waitForTimeout(500); // let MUI label/ripple transitions settle
   await page.screenshot({ path: `${SCREENS}/edr.png` });
 
   await page.getByRole('button', { name: 'Fetch' }).click();
-  const dialog = page.getByRole('dialog');
-  await expect(dialog.getByTestId('result-json')).toContainText('"type": "Coverage');
-  await expect(dialog.locator('svg').first()).toBeVisible();
+  const panel = page.getByTestId('edr-result');
+  await expect(panel.locator('svg').first()).toBeVisible(); // the series chart, in the sidebar
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await panel.getByRole('button', { name: 'View JSON' }).click();
+  await expect(page.getByRole('dialog').getByTestId('result-json')).toContainText('"type": "Coverage');
 });
 
 test('record -> Maps -> draw bbox -> Fetch puts an image overlay on the map', async ({ page }) => {

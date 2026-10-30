@@ -25,7 +25,7 @@ import {
   DEFAULT_CORRIDOR_HEIGHT,
   DEFAULT_RADIUS_UNITS,
   DEFAULT_WIDTH_UNITS,
-  DRAW_KIND,
+  AREA_SHAPES,
   EDR_JOB,
   EDR_MODES,
   HEIGHT_UNITS,
@@ -41,6 +41,7 @@ import {
   combineDatetime,
   defaultDatetime,
   describePoints,
+  drawKindFor,
   geometryToPoints,
   instanceUrl,
   instancesUrl,
@@ -50,16 +51,14 @@ import {
   parseInstances,
   parseNumber,
   parseTemporal,
-  parseTimeSeries,
   queryGeometry,
+  type AreaShape,
   type EdrCollectionInfo,
   type EdrMode,
   type TemporalExtent,
 } from '../../lib/edr';
 import type { Position } from '../../lib/types';
-import { TimeseriesCharts } from './TimeseriesChart';
-
-const MAX_CHARTS = 8;
+import { ResultPanel, type FetchedResult } from './ResultPanel';
 
 type Status = { severity: 'error' | 'info' | 'success' | 'warning'; text: string } | null;
 
@@ -154,8 +153,12 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
   const [widthUnits, setWidthUnits] = useState(DEFAULT_WIDTH_UNITS);
   const [corridorHeight, setCorridorHeight] = useState(DEFAULT_CORRIDOR_HEIGHT);
   const [heightUnits, setHeightUnits] = useState(HEIGHT_UNITS[0]);
+  const [areaShape, setAreaShape] = useState<AreaShape>('rectangle');
   const [drawing, setDrawing] = useState(false);
   const [status, setStatus] = useState<Status>(null);
+  // The last response; its ResultPanel draws it on the map (and clears the map when it goes away).
+  const [fetched, setFetched] = useState<FetchedResult | null>(null);
+  const fetchSeq = useRef(0);
 
   const modes = useMemo(() => (info ? availableModes(info.modes) : []), [info]);
   const noModes = info !== null && modes.length === 0;
@@ -268,6 +271,7 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
         collectionUrl,
         mode,
         points,
+        areaShape,
         params,
         datetime,
         instanceId: effectiveInstance,
@@ -283,6 +287,7 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
       collectionUrl,
       mode,
       points,
+      areaShape,
       params,
       datetime,
       effectiveInstance,
@@ -315,11 +320,12 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
     [setBusy],
   );
   useEffect(() => {
-    map.showGeometry(queryGeometry(mode, points));
-  }, [map, mode, points]);
+    map.showGeometry(queryGeometry(mode, points, areaShape));
+  }, [map, mode, points, areaShape]);
   useEffect(
     () => () => {
       map.clear();
+      map.clearData();
     },
     [map],
   );
@@ -336,14 +342,22 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
     resetDrawing();
     setMode(m);
     setStatus(null);
+    setFetched(null);
+  };
+
+  const chooseAreaShape = (shape: AreaShape | null) => {
+    if (!shape || shape === areaShape) return;
+    resetDrawing(); // the drawn points of the other shape mean something else
+    setAreaShape(shape);
+    setStatus(null);
   };
 
   const draw = async () => {
     setStatus(null);
     setDrawing(true);
     try {
-      const g = await map.drawGeometry(DRAW_KIND[mode]);
-      setPoints(geometryToPoints(mode, g));
+      const g = await map.drawGeometry(drawKindFor(mode, areaShape));
+      setPoints(geometryToPoints(mode, g, areaShape));
     } catch (e) {
       if (!(e instanceof DrawCancelledError)) setStatus({ severity: 'error', text: errorMessage(e) });
     } finally {
@@ -377,6 +391,8 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
       }
     }
     setStatus({ severity: 'info', text: 'Fetching...' });
+    setFetched(null);
+    map.clearData();
     activeRef.current?.abort();
     const ctrl = new AbortController();
     activeRef.current = ctrl;
@@ -406,14 +422,7 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
       });
       if (!current()) return;
       const text = JSON.stringify(data, null, 2);
-      const series = parseTimeSeries(data).slice(0, MAX_CHARTS);
-      setResult({
-        kind: 'json',
-        data,
-        text,
-        filename: fileNameFor(target),
-        extra: series.length ? <TimeseriesCharts series={series} /> : undefined,
-      });
+      setFetched({ id: ++fetchSeq.current, data, text, filename: fileNameFor(target) });
       setStatus({ severity: 'success', text: `Response received (${text.length.toLocaleString()} chars)` });
     } catch (e) {
       if (!current()) return;
@@ -484,6 +493,29 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1, fontStyle: 'italic' }}>
           {MODE_HELP[mode]}
         </Typography>
+        {mode === 'area' && (
+          <ToggleButtonGroup
+            exclusive
+            size="small"
+            value={areaShape}
+            onChange={(_, v: AreaShape | null) => chooseAreaShape(v)}
+            aria-label="Area shape"
+            data-testid="edr-area-shape"
+            disabled={drawing}
+            sx={{ mt: 1 }}
+          >
+            {AREA_SHAPES.map((a) => (
+              <ToggleButton key={a} value={a} aria-label={a}>
+                {cap(a)}
+              </ToggleButton>
+            ))}
+          </ToggleButtonGroup>
+        )}
+        {mode === 'area' && areaShape === 'polygon' && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+            Click each vertex, double-click to finish.
+          </Typography>
+        )}
         <Stack direction="row" spacing={1} sx={{ mt: 1 }} alignItems="center">
           <Button
             variant="outlined"
@@ -499,7 +531,7 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
           </Button>
         </Stack>
         <Typography variant="caption" color="text.secondary" data-testid="edr-geometry" sx={{ display: 'block', mt: 0.5 }}>
-          {describePoints(points)}
+          {describePoints(points, mode, areaShape)}
         </Typography>
 
         {mode === 'radius' && (
@@ -692,6 +724,14 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
         <Alert severity={status.severity} sx={{ mt: 1 }} data-testid="edr-status">
           {status.text}
         </Alert>
+      )}
+      {fetched && (
+        <ResultPanel
+          key={fetched.id}
+          result={fetched}
+          mode={mode}
+          onViewJson={() => setResult({ kind: 'json', data: fetched.data, text: fetched.text, filename: fetched.filename })}
+        />
       )}
     </>
   );

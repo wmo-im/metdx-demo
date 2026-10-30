@@ -32,7 +32,7 @@ export const EDR_JOB: { pollIntervalMs: number; maxPolls: number } = { pollInter
 
 export const MODE_HELP: Record<EdrMode, string> = {
   position: 'Draw a single point on the map',
-  area: 'Draw a rectangle on the map',
+  area: 'Draw a rectangle or a free polygon on the map',
   trajectory: 'Draw a path on the map (double-click to finish)',
   radius: 'Draw the centre on the map, then set the radius and its units',
   cube: "Draw the cube's bounding box on the map",
@@ -48,6 +48,15 @@ export const DRAW_KIND: Record<EdrMode, DrawKind> = {
   cube: 'bbox',
   corridor: 'line',
 };
+
+/** How an `area` query is drawn: a rectangle (two corners) or a free polygon (any number of vertices). */
+export type AreaShape = 'rectangle' | 'polygon';
+export const AREA_SHAPES: readonly AreaShape[] = ['rectangle', 'polygon'];
+
+/** What the map should let the user draw: like {@link DRAW_KIND}, but `area` can be a free polygon (cube is bbox only). */
+export function drawKindFor(mode: EdrMode, areaShape: AreaShape = 'rectangle'): DrawKind {
+  return mode === 'area' && areaShape === 'polygon' ? 'polygon' : DRAW_KIND[mode];
+}
 
 /** ECMWF pressure-level parameters that need a vertical level (`z`). */
 export const LEVEL_PARAMS: ReadonlySet<string> = new Set(['t', 'u', 'v', 'w', 'gh', 'r', 'q', 'd', 'vo', 'pv']);
@@ -98,8 +107,13 @@ export interface EdrQuery {
   /** Collection URL (any `?query` is dropped). */
   collectionUrl: string;
   mode: EdrMode;
-  /** `[lon, lat]` points: position/radius 1, area/cube 2 corners, trajectory/corridor >= 2. */
+  /**
+   * `[lon, lat]` points: position/radius 1, area/cube 2 corners, trajectory/corridor >= 2.
+   * An `area` with `areaShape: 'polygon'` takes the polygon's vertices instead (>= 3; the ring need not be closed).
+   */
   points: Position[];
+  /** `area` only (default `rectangle`). */
+  areaShape?: AreaShape;
   params: readonly string[];
   /** ISO datetime or `start/end`. */
   datetime?: string | null;
@@ -141,6 +155,22 @@ function cornerBox(points: Position[]): { minLon: number; minLat: number; maxLon
   return { minLon: Math.min(...lons), minLat: Math.min(...lats), maxLon: Math.max(...lons), maxLat: Math.max(...lats) };
 }
 
+/**
+ * Vertices of a free polygon as a closed ring (first point repeated last, as WKT requires): coordinates rounded to
+ * 3 decimals, consecutive duplicates (e.g. from a double-click) dropped. Fewer than 4 entries = not a polygon yet.
+ */
+function polygonRing(points: Position[]): Position[] {
+  const ring: Position[] = [];
+  for (const p of points) {
+    const r: Position = [round3(p[0]), round3(p[1])];
+    const last = ring[ring.length - 1];
+    if (!last || last[0] !== r[0] || last[1] !== r[1]) ring.push(r);
+  }
+  while (ring.length > 1 && ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1]) ring.pop();
+  if (ring.length < 3) return [];
+  return [...ring, ring[0]];
+}
+
 const wktLine = (points: Position[]): string => `LINESTRING(${points.map(([lon, lat]) => `${pyFloat(lon)} ${pyFloat(lat)}`).join(',')})`;
 const wktPoint = ([lon, lat]: Position): string => `POINT(${pyFloat(lon)} ${pyFloat(lat)})`;
 
@@ -172,6 +202,13 @@ export function buildEdrUrl(q: EdrQuery): string | null {
       coords = wktPoint(points[0]);
       break;
     case 'area': {
+      if (q.areaShape === 'polygon') {
+        const ring = polygonRing(points);
+        if (ring.length < 4) return null;
+        endpoint = 'area';
+        coords = `POLYGON((${ring.map(([lon, lat]) => `${pyFloat(lon)} ${pyFloat(lat)}`).join(',')}))`;
+        break;
+      }
       if (points.length < 2) return null;
       const { minLon, minLat, maxLon, maxLat } = cornerBox(points);
       const f = pyFloat;
@@ -215,8 +252,13 @@ export function buildEdrUrl(q: EdrQuery): string | null {
 /* ----------------------------------------------------------------- geometry */
 
 /** The geometry to draw on the map for the current points, or `null` if none. */
-export function queryGeometry(mode: EdrMode, points: Position[]): Geometry | null {
+export function queryGeometry(mode: EdrMode, points: Position[], areaShape: AreaShape = 'rectangle'): Geometry | null {
   if (!points.length) return null;
+  if (mode === 'area' && areaShape === 'polygon') {
+    const ring = polygonRing(points);
+    if (ring.length) return { type: 'Polygon', coordinates: [ring] };
+    return points.length < 2 ? { type: 'Point', coordinates: points[0] } : { type: 'LineString', coordinates: points };
+  }
   switch (mode) {
     case 'position':
     case 'radius':
@@ -245,8 +287,9 @@ export function queryGeometry(mode: EdrMode, points: Position[]): Geometry | nul
 }
 
 /** Points (rounded to 3 decimals, `[lon, lat]`) for a geometry the user drew. */
-export function geometryToPoints(mode: EdrMode, g: Geometry): Position[] {
+export function geometryToPoints(mode: EdrMode, g: Geometry, areaShape: AreaShape = 'rectangle'): Position[] {
   const r = (p: Position): Position => [round3(p[0]), round3(p[1])];
+  if (mode === 'area' && areaShape === 'polygon' && g.type === 'Polygon') return polygonRing(g.coordinates[0] ?? []).slice(0, -1);
   switch (g.type) {
     case 'Point':
       return [r(g.coordinates)];
@@ -263,9 +306,10 @@ export function geometryToPoints(mode: EdrMode, g: Geometry): Position[] {
 }
 
 /** Short human-readable summary of the current points. */
-export function describePoints(points: Position[]): string {
+export function describePoints(points: Position[], mode?: EdrMode, areaShape: AreaShape = 'rectangle'): string {
   const f = (p: Position) => `${pyFloat(p[1])}°N ${pyFloat(p[0])}°E`;
   if (!points.length) return 'Nothing drawn yet';
+  if (mode === 'area' && areaShape === 'polygon') return `Polygon with ${points.length} vert${points.length === 1 ? 'ex' : 'ices'}`;
   if (points.length <= 2) return points.map(f).join(' → ');
   return `${points.length} points, ${f(points[0])} → ${f(points[points.length - 1])}`;
 }
