@@ -1,5 +1,5 @@
 export * from './routes';
-export { MapProvider, MapView, useMap, DrawCancelledError } from './MapContext';
+export { MapProvider, MapView, useMap, useMapEngine, DrawCancelledError } from './MapContext';
 export type { MapApi } from './MapContext';
 export { RequestBarProvider, RequestBar, ResultDialog, useRequestBar, useRegisterFetch } from './RequestBar';
 export type { RequestBarApi, RequestResult, FetchHandler } from './RequestBar';

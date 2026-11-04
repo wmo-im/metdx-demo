@@ -4,11 +4,12 @@ const PORT = 4173;
 
 /**
  * End-to-end tests run in chromium against `vite preview` of the production build.
- * - `mock` (test/e2e): mock mode (`?mock=1`) and routed synthetic data; offline, deterministic. `npm run e2e`.
+ * - `mock-ol` / `mock-leaflet` (test/e2e): mock mode (`?mock=1`) and routed synthetic data; offline, deterministic. The same
+ *   specs run once per map engine (the `engine` option, see test/e2e/engine.ts). `npm run e2e` runs both.
  * - `live` (test/e2e-live): real ECMWF/DestinE requests (through Playwright, no proxy server). Opt-in:
  *   `npm run e2e:live` (sets E2E_LIVE=1; without it the live tests are skipped, e.g. a plain `npx playwright test`).
  */
-export default defineConfig({
+export default defineConfig<{ engine: 'ol' | 'leaflet' }>({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
@@ -20,10 +21,16 @@ export default defineConfig({
   },
   projects: [
     {
-      name: 'mock',
+      name: 'mock-ol',
       testDir: './test/e2e',
-      outputDir: './test-results/mock', // keeps test-results/screens (shared by both projects) out of the clean-up
-      use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } },
+      outputDir: './test-results/mock-ol', // keeps test-results/screens (shared by all projects) out of the clean-up
+      use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 }, engine: 'ol' },
+    },
+    {
+      name: 'mock-leaflet',
+      testDir: './test/e2e',
+      outputDir: './test-results/mock-leaflet',
+      use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 }, engine: 'leaflet' },
     },
     {
       name: 'live',

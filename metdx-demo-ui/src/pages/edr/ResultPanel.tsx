@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Box, Button, MenuItem, Slider, Stack, TextField, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material';
 import DataObjectIcon from '@mui/icons-material/DataObject';
-import { useMap } from '../../shell';
+import { useMap, useMapEngine } from '../../shell';
 import { Legend } from '../../shell/Legend';
 import { CovJsonError, parseCoverageJson, pointSeries, type CovJsonLayer } from '../../lib/covjson';
 import { DEFAULT_COLOUR_SCALE, TooLargeToDraw, isGridSpec, type DataStyle } from '../../lib/covjsonTypes';
@@ -61,6 +61,10 @@ interface Props {
  */
 export function ResultPanel({ result, mode, onViewJson }: Props) {
   const map = useMap();
+  const canCoverage = useMapEngine()?.capabilities.coverageRenderer === true;
+  const [renderer, setRenderer] = useState<'builtin' | 'coverage'>('builtin');
+  const [coverageError, setCoverageError] = useState<string | null>(null);
+  const useCoverage = canCoverage && renderer === 'coverage';
   const [levelIndex, setLevelIndex] = useState(0);
   const parsed = useMemo(() => parse(result.data, levelIndex), [result.data, levelIndex]);
   const layer = parsed.layer;
@@ -88,6 +92,20 @@ export function ResultPanel({ result, mode, onViewJson }: Props) {
   // Draw (or recolour, for the same layer; an opacity change alone only sets the layer opacity).
   useEffect(() => {
     if (!layer || !param) return;
+    if (useCoverage) {
+      let current = true;
+      map.showCoverage?.(layer, param.key, ti).then(
+        () => current && setCoverageError(null),
+        (e: unknown) => {
+          if (!current) return;
+          setCoverageError(e instanceof Error ? e.message : String(e));
+          setRenderer('builtin'); // fall back to the built-in drawing
+        },
+      );
+      return () => {
+        current = false;
+      };
+    }
     map.showData(layer, {
       param: param.key,
       timeIndex: ti,
@@ -95,7 +113,7 @@ export function ResultPanel({ result, mode, onViewJson }: Props) {
       style,
       ...(opacityChoice === null ? {} : { opacity: opacityChoice }),
     });
-  }, [map, layer, param, ti, style, opacityChoice]);
+  }, [map, layer, param, ti, style, opacityChoice, useCoverage]);
 
   // A replaced layer (other level) invalidates a selection only if it no longer fits.
   useEffect(() => {
@@ -182,7 +200,30 @@ export function ResultPanel({ result, mode, onViewJson }: Props) {
                 />
               </Box>
             )}
-            {canContour && (
+            {canCoverage && (
+              <ToggleButtonGroup
+                exclusive
+                size="small"
+                fullWidth
+                aria-label="Renderer"
+                data-testid="edr-renderer-toggle"
+                value={renderer}
+                onChange={(_, v: 'builtin' | 'coverage' | null) => {
+                  if (!v) return;
+                  setCoverageError(null);
+                  setRenderer(v);
+                }}
+              >
+                <ToggleButton value="builtin">Built-in</ToggleButton>
+                <ToggleButton value="coverage">leaflet-coverage</ToggleButton>
+              </ToggleButtonGroup>
+            )}
+            {coverageError !== null && (
+              <Alert severity="warning" data-testid="edr-coverage-error">
+                leaflet-coverage could not render this result: {coverageError}
+              </Alert>
+            )}
+            {canContour && !useCoverage && (
               <ToggleButtonGroup
                 exclusive
                 size="small"
@@ -196,21 +237,23 @@ export function ResultPanel({ result, mode, onViewJson }: Props) {
                 <ToggleButton value="points">Points</ToggleButton>
               </ToggleButtonGroup>
             )}
-            <Box sx={{ px: 1 }}>
-              <Typography variant="caption" color="text.secondary" data-testid="edr-opacity-label">
-                Opacity: {Math.round(opacity * 100)}%
-              </Typography>
-              <Slider
-                size="small"
-                aria-label="Opacity"
-                data-testid="edr-opacity"
-                min={0.1}
-                max={1}
-                step={0.05}
-                value={opacity}
-                onChange={(_, v) => setOpacityChoice(Math.round((v as number) * 100) / 100)}
-              />
-            </Box>
+            {!useCoverage && (
+              <Box sx={{ px: 1 }}>
+                <Typography variant="caption" color="text.secondary" data-testid="edr-opacity-label">
+                  Opacity: {Math.round(opacity * 100)}%
+                </Typography>
+                <Slider
+                  size="small"
+                  aria-label="Opacity"
+                  data-testid="edr-opacity"
+                  min={0.1}
+                  max={1}
+                  step={0.05}
+                  value={opacity}
+                  onChange={(_, v) => setOpacityChoice(Math.round((v as number) * 100) / 100)}
+                />
+              </Box>
+            )}
             {support && !support.ok && support.reason === 'too-many' && (
               <Typography variant="caption" color="text.secondary" data-testid="edr-style-note">
                 Too many points to draw contours (more than {MAX_CONTOUR_POINTS.toLocaleString('en-GB')}); showing points.

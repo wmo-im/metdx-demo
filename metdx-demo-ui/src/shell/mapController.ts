@@ -30,6 +30,8 @@ import {
   type ShowDataOptions,
 } from '../lib/covjsonTypes';
 import { bandColour, computeContours, contourSupport, getTriangulation, type ContourSet } from '../lib/contour';
+import { DrawCancelledError, type MapApi, type MapCapabilities, type MapEngine } from './mapApi';
+import 'ol/ol.css';
 
 /**
  * Basemap tiles. Carto Voyager (`basemaps.cartocdn.com/rastertiles/voyager`) now answers with an
@@ -41,39 +43,6 @@ export const BASEMAP_URL: string = import.meta.env.VITE_BASEMAP_URL || 'https://
 const ATTRIBUTION: string =
   import.meta.env.VITE_BASEMAP_ATTRIBUTION ||
   '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
-
-/** Rejection reason when a draw is cancelled (Escape, new draw, clear). */
-export class DrawCancelledError extends Error {
-  constructor() {
-    super('Drawing cancelled');
-    this.name = 'DrawCancelledError';
-  }
-}
-
-/** The map API shared with the pages (via {@link useMap}). */
-export interface MapApi {
-  /** Let the user draw a geometry on the map; resolves in lon/lat. `bbox` yields a rectangle Polygon. */
-  drawGeometry(kind: DrawKind): Promise<Geometry>;
-  /** Show an image (URL) stretched over `bbox` (EPSG:4326); `null` removes it. */
-  setOverlay(img: string | null, bbox?: BBox | null, opts?: { fit?: boolean; opacity?: number }): void;
-  /** Remove drawn geometry, overlay, extent outline and cancel any draw in progress. */
-  clear(): void;
-  /** Show a geometry (e.g. the current query) without drawing; `null` hides it. */
-  showGeometry(geometry: Geometry | null): void;
-  /** Outline a collection extent (orange); `null` hides it. */
-  showExtent(bbox: BBox | null): void;
-  /**
-   * Draw a normalised CoverageJSON result (points, trajectory or grid) coloured by `opts.param` at
-   * `opts.timeIndex`, and zoom to its extent. Calling again with the same `layer` only recolours
-   * (param/time/style change); with a different `layer` it replaces the previous one. `opts.style: 'contours'`
-   * draws a point layer as filled contours instead of points (falls back to points if it cannot be contoured).
-   */
-  showData(layer: DataLayer, opts: ShowDataOptions): void;
-  /** Remove the data layer and release its resources. */
-  clearData(): void;
-  /** Subscribe to clicks on drawn data; returns an unsubscribe function. */
-  onDataSelect(cb: DataSelectHandler): () => void;
-}
 
 const ORANGE = '#f57c00';
 const BLUE = '#1565c0';
@@ -224,7 +193,9 @@ const DEFAULT_GRID_OPACITY = 0.85;
 const DEFAULT_CONTOUR_OPACITY = 0.9;
 const DEFAULT_POINTS_OPACITY = 1;
 
-export class MapController implements MapApi {
+/** The OpenLayers {@link MapEngine}; it is its own {@link MapApi}. */
+export class MapController implements MapApi, MapEngine {
+  readonly capabilities: MapCapabilities = {};
   private map: Map | null = null;
   private readonly overlayLayer = new ImageLayer({ zIndex: 5, opacity: 0.8 });
   private readonly extentSource = new VectorSource();
@@ -305,6 +276,10 @@ export class MapController implements MapApi {
     this.clickKey = null;
     this.map?.setTarget(undefined);
     this.map = null;
+  }
+
+  get api(): MapApi {
+    return this;
   }
 
   /** The OL map (for tests / advanced use). */

@@ -1,5 +1,6 @@
 {
   "recordsSource": "catalogue",
+  "mapEngine": "ol",
   "catalogueUrl": "https://wmo-resource-catalogue.labs.wis2dev.io/collections/wis2-discovery-metadata",
   "defaultQuery": "metdx-demo",
   "proxy": true

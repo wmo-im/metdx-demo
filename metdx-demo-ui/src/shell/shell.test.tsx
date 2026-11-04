@@ -4,10 +4,12 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import App from '../App';
 import { setFetchImpl } from '../lib/http';
-import { resetConfig, setRecordsSource } from '../lib/config';
+import { loadConfig, resetConfig, setRecordsSource } from '../lib/config';
 import { createMockFetch } from '../lib/mockFetch';
 import { MapController } from './mapController';
-import { MapProvider, useMap } from './MapContext';
+import { MapProvider, MapView, useMap, useMapEngine } from './MapContext';
+import { ENGINE_STORAGE_KEY, EngineHost, resolveEngineName } from './engine';
+import { DrawCancelledError, type MapApi, type MapEngine, type MapEngineName } from './mapApi';
 import { RequestBar, RequestBarProvider, useRegisterFetch, useRequestBar } from './RequestBar';
 import { cacheRecord, clearRecordCache, getCachedRecord, loadRecord, useRecord } from './recordCache';
 import { paths } from './routes';
@@ -224,6 +226,155 @@ describe('Map contract', () => {
     await assertion;
     ctrl.detach();
     div.remove();
+  });
+});
+
+/** Recording engine: no map library, just the contract. */
+class FakeEngine implements MapEngine {
+  readonly capabilities = {};
+  el: HTMLElement | null = null;
+  calls: string[] = [];
+  rejectDraw: ((e: unknown) => void) | null = null;
+  readonly api: MapApi;
+  constructor(readonly name: string) {
+    const rec = (m: string) => () => void this.calls.push(m);
+    this.api = {
+      drawGeometry: () => new Promise((_, reject) => void (this.rejectDraw = reject)),
+      setOverlay: rec('setOverlay'),
+      clear: rec('clear'),
+      showGeometry: (g) => void this.calls.push(`showGeometry:${g ? g.type : 'null'}`),
+      showExtent: rec('showExtent'),
+      showData: rec('showData'),
+      clearData: rec('clearData'),
+      onDataSelect: () => () => {},
+    };
+  }
+  attach(el: HTMLElement) {
+    this.el = el;
+    el.setAttribute('data-fake', this.name);
+  }
+  detach() {
+    this.el?.removeAttribute('data-fake');
+    this.el = null;
+  }
+  cancel() {
+    this.rejectDraw?.(new DrawCancelledError());
+    this.rejectDraw = null;
+  }
+}
+
+describe('engine selection', () => {
+  afterEach(() => {
+    sessionStorage.clear();
+    resetConfig();
+  });
+
+  it('?map= beats sessionStorage, which beats the config', async () => {
+    expect(resolveEngineName('')).toBe('ol');
+    await loadConfig(async () => new Response(JSON.stringify({ mapEngine: 'leaflet' })), '');
+    expect(resolveEngineName('')).toBe('leaflet');
+    sessionStorage.setItem(ENGINE_STORAGE_KEY, 'ol');
+    expect(resolveEngineName('')).toBe('ol');
+    expect(resolveEngineName('?map=leaflet')).toBe('leaflet');
+    expect(resolveEngineName('?map=bogus')).toBe('ol');
+  });
+});
+
+describe('EngineHost', () => {
+  afterEach(() => sessionStorage.clear());
+
+  const make = (name: MapEngineName = 'ol') => {
+    const engines: FakeEngine[] = [];
+    const host = new EngineHost(name, async (n) => {
+      const e = new FakeEngine(n);
+      engines.push(e);
+      return e;
+    });
+    return { host, engines };
+  };
+  const ready = () => act(async () => {});
+
+  it('replays remembered state when the engine arrives and on a switch; switching cancels the draw and clears data', async () => {
+    const { host, engines } = make('ol');
+    const div = document.createElement('div');
+    host.showGeometry({ type: 'Point', coordinates: [1, 2] }); // before the engine is loaded
+    host.attach(div);
+    const early = host.drawGeometry('bbox'); // waits for the engine
+    await ready();
+    expect(host.getSnapshot()).toMatchObject({ name: 'ol', status: 'ready' });
+    expect(div.getAttribute('data-fake')).toBe('ol');
+    expect(engines[0].calls).toContain('showGeometry:Point');
+    expect(engines[0].rejectDraw).not.toBeNull(); // the waiting draw started on the engine
+
+    host.setOverlay('blob:x', [0, 0, 1, 1]);
+    const assertion = expect(early).rejects.toBeInstanceOf(DrawCancelledError);
+    host.switchTo('leaflet');
+    expect(host.getSnapshot()).toMatchObject({ name: 'leaflet', status: 'loading' });
+    await assertion;
+    expect(engines[0].calls).toContain('clearData');
+    expect(engines[0].el).toBeNull();
+    expect(sessionStorage.getItem(ENGINE_STORAGE_KEY)).toBe('leaflet');
+    await ready();
+    expect(engines).toHaveLength(2);
+    expect(engines[1].calls).toEqual(expect.arrayContaining(['showGeometry:Point', 'setOverlay']));
+    expect(div.getAttribute('data-fake')).toBe('leaflet');
+  });
+
+  it('a failing load is reported, draws reject, and a later switch recovers', async () => {
+    const good = new FakeEngine('ol');
+    const host = new EngineHost('leaflet', async (n) => {
+      if (n === 'leaflet') throw new Error('not available yet');
+      return good;
+    });
+    await ready();
+    expect(host.getSnapshot()).toMatchObject({ status: 'error' });
+    expect(host.getSnapshot().error?.message).toMatch(/not available yet/);
+    await expect(host.drawGeometry('point')).rejects.toThrow(/not available yet/);
+    host.switchTo('ol');
+    await ready();
+    expect(host.getSnapshot()).toMatchObject({ name: 'ol', status: 'ready', error: null });
+  });
+
+  it('ignores a load that finishes after another switch', async () => {
+    let release!: (e: MapEngine) => void;
+    const slow = new FakeEngine('slow');
+    const fast = new FakeEngine('fast');
+    const host = new EngineHost('ol', (n) => (n === 'ol' ? new Promise<MapEngine>((r) => (release = r)) : Promise.resolve(fast)));
+    host.attach(document.createElement('div'));
+    host.switchTo('leaflet');
+    await ready();
+    release(slow);
+    await ready();
+    expect(host.getSnapshot().name).toBe('leaflet');
+    expect(slow.el).toBeNull();
+    expect(fast.calls).toContain('showExtent');
+  });
+
+  it('MapView remounts its element on a switch (useMapEngine drives it)', async () => {
+    const spy = vi.spyOn(Storage.prototype, 'getItem').mockReturnValue('ol');
+    let engineApi: ReturnType<typeof useMapEngine> = null;
+    function Probe() {
+      engineApi = useMapEngine();
+      return null;
+    }
+    const { container } = render(
+      <MapProvider>
+        <Probe />
+        <MapView />
+      </MapProvider>,
+    );
+    spy.mockRestore();
+    await ready();
+    const first = container.querySelector('[data-testid="map"]');
+    expect(first?.getAttribute('data-engine')).toBe('ol');
+    expect(first?.childElementCount).toBeGreaterThan(0); // the real OL map mounted
+    await act(async () => engineApi!.switchEngine('leaflet'));
+    await ready();
+    const second = container.querySelector('[data-testid="map"]');
+    expect(second).not.toBe(first);
+    expect(second?.getAttribute('data-engine')).toBe('leaflet');
+    await waitFor(() => expect(second?.childElementCount).toBeGreaterThan(0)); // the real Leaflet map mounted (lazy chunk)
+    sessionStorage.clear();
   });
 });
 

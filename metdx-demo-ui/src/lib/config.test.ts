@@ -9,6 +9,7 @@ import {
   loadConfig,
   parseCatalogueUrl,
   parseDefaultQuery,
+  parseMapEngine,
   parseProxy,
   parseRecordsSource,
   resetConfig,
@@ -26,6 +27,7 @@ describe('records source selection', () => {
   it('defaults to the live catalogue', () => {
     expect(resolveConfig(undefined)).toEqual({
       recordsSource: 'catalogue',
+      mapEngine: 'ol',
       catalogueUrl: DEFAULT_CATALOGUE_URL,
       defaultQuery: 'metdx-demo',
       proxy: true,
@@ -113,5 +115,18 @@ describe('proxy setting', () => {
   });
   it('config.json is requested under the Vite base path', () => {
     expect(CONFIG_URL).toBe(`${import.meta.env.BASE_URL}config.json`);
+  });
+});
+
+describe('map engine', () => {
+  it('defaults to ol, the file overrides it and ?map= overrides the file; invalid values are ignored', () => {
+    expect(resolveConfig(undefined).mapEngine).toBe('ol');
+    expect(resolveConfig({ mapEngine: 'leaflet' }).mapEngine).toBe('leaflet');
+    expect(resolveConfig({ mapEngine: 'leaflet' }, '?map=ol').mapEngine).toBe('ol');
+    expect(resolveConfig({ mapEngine: 'ol' }, '?records=local&map=Leaflet').mapEngine).toBe('leaflet');
+    expect(resolveConfig({ mapEngine: 'leaflet' }, '?map=bogus').mapEngine).toBe('leaflet');
+    expect(resolveConfig({ mapEngine: 'bogus' }).mapEngine).toBe('ol');
+    expect(parseMapEngine(' OL ')).toBe('ol');
+    expect(parseMapEngine(3)).toBeUndefined();
   });
 });

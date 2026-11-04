@@ -17,13 +17,18 @@
  * - `proxy`: true (default) routes upstream calls through the same-origin
  *            `/api/proxy`; false calls the upstream servers directly from the
  *            browser (static hosting such as GitHub Pages; needs CORS upstream).
+ * - `mapEngine`: "ol" (default, OpenLayers) or "leaflet". Overridable with `?map=ol|leaflet`; the app-bar
+ *                toggle (kept in sessionStorage) wins over the config file.
  *
  * EDR and Maps calls are independent of this setting (live unless mock mode).
  */
 export type RecordsSource = 'local' | 'catalogue';
 
+export type MapEngineName = 'ol' | 'leaflet';
+
 export interface AppConfig {
   recordsSource: RecordsSource;
+  mapEngine: MapEngineName;
   catalogueUrl: string;
   defaultQuery: string;
   proxy: boolean;
@@ -35,6 +40,7 @@ export const DEFAULT_QUERY = 'metdx-demo';
 
 export const DEFAULT_CONFIG: AppConfig = {
   recordsSource: 'catalogue',
+  mapEngine: 'ol',
   catalogueUrl: DEFAULT_CATALOGUE_URL,
   defaultQuery: DEFAULT_QUERY,
   proxy: true,
@@ -57,6 +63,12 @@ export function parseRecordsSource(value: unknown): RecordsSource | undefined {
   return v === 'catalogue' || v === 'gdc' ? 'catalogue' : undefined;
 }
 
+export function parseMapEngine(value: unknown): MapEngineName | undefined {
+  if (typeof value !== 'string') return undefined;
+  const v = value.trim().toLowerCase();
+  return v === 'ol' || v === 'leaflet' ? v : undefined;
+}
+
 /** A valid http(s) URL without trailing slashes, else undefined. */
 export function parseCatalogueUrl(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
@@ -72,18 +84,22 @@ export function parseDefaultQuery(value: unknown): string | undefined {
   return typeof value === 'string' ? value.trim() : undefined;
 }
 
-/** Pure merge: defaults < config file < `?records=` in `search` (invalid values are ignored). */
+/** Pure merge: defaults < config file < `?records=` / `?map=` in `search` (invalid values are ignored). */
 export function resolveConfig(file: unknown, search = ''): AppConfig {
   const obj = file && typeof file === 'object' ? (file as Record<string, unknown>) : {};
   const fromFile = parseRecordsSource(obj.recordsSource);
   let fromUrl: RecordsSource | undefined;
+  let mapFromUrl: MapEngineName | undefined;
   try {
-    fromUrl = parseRecordsSource(new URLSearchParams(search).get('records'));
+    const params = new URLSearchParams(search);
+    fromUrl = parseRecordsSource(params.get('records'));
+    mapFromUrl = parseMapEngine(params.get('map'));
   } catch {
     /* ignore */
   }
   return {
     recordsSource: fromUrl ?? fromFile ?? DEFAULT_CONFIG.recordsSource,
+    mapEngine: mapFromUrl ?? parseMapEngine(obj.mapEngine) ?? DEFAULT_CONFIG.mapEngine,
     catalogueUrl: parseCatalogueUrl(obj.catalogueUrl) ?? DEFAULT_CONFIG.catalogueUrl,
     defaultQuery: parseDefaultQuery(obj.defaultQuery) ?? DEFAULT_CONFIG.defaultQuery,
     proxy: parseProxy(obj.proxy) ?? DEFAULT_CONFIG.proxy,
@@ -117,6 +133,11 @@ export function catalogueHost(): string {
   } catch {
     return current.catalogueUrl;
   }
+}
+
+/** Map engine from the config file / `?map=` (the app-bar choice in sessionStorage is applied on top, see `shell/engine.ts`). */
+export function getMapEngine(): MapEngineName {
+  return current.mapEngine;
 }
 
 /** Search text used when the URL has no `?q=` ("" = none). */

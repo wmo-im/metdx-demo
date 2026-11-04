@@ -1,15 +1,44 @@
-import { AppBar, Box, Chip, IconButton, Toolbar, Tooltip, Typography } from '@mui/material';
+import { AppBar, Box, Chip, IconButton, ToggleButton, ToggleButtonGroup, Toolbar, Tooltip, Typography } from '@mui/material';
 import PublicIcon from '@mui/icons-material/Public';
 import HomeIcon from '@mui/icons-material/Home';
 import { Link as RouterLink, Outlet } from 'react-router-dom';
-import { MapView } from './MapContext';
+import { MapView, useMapEngine } from './MapContext';
+import { ENGINE_LABELS } from './engine';
+import type { MapEngineName } from './mapApi';
 import { RequestBar, ResultDialog } from './RequestBar';
 import { isMockMode } from '../lib/mockFetch';
 import { paths } from './routes';
 
 export const SIDEBAR_WIDTH = 400;
 
-/** App bar + left sidebar (routed page) + OpenLayers map + bottom request bar. */
+const ENGINES: MapEngineName[] = ['ol', 'leaflet'];
+
+/** Map engine toggle of the app bar (hidden when the engine is fixed, e.g. injected in tests). */
+function EngineToggle() {
+  const engine = useMapEngine();
+  if (!engine) return null;
+  return (
+    <ToggleButtonGroup
+      size="small"
+      exclusive
+      value={engine.name}
+      onChange={(_, v: MapEngineName | null) => v && engine.switchEngine(v)}
+      aria-label="Map engine"
+      sx={{
+        '& .MuiToggleButton-root': { color: 'inherit', borderColor: 'rgba(255,255,255,0.5)', py: 0, px: 1, fontSize: 12, textTransform: 'none' },
+        '& .Mui-selected': { bgcolor: 'rgba(255,255,255,0.25) !important' },
+      }}
+    >
+      {ENGINES.map((n) => (
+        <ToggleButton key={n} value={n} aria-label={`${ENGINE_LABELS[n]} map`}>
+          {ENGINE_LABELS[n]}
+        </ToggleButton>
+      ))}
+    </ToggleButtonGroup>
+  );
+}
+
+/** App bar + left sidebar (routed page) + map (OpenLayers or Leaflet) + bottom request bar. */
 export function Layout() {
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default' }}>
@@ -19,6 +48,7 @@ export function Layout() {
           <Typography variant="h6" component="h1" sx={{ flexGrow: 1, fontSize: 18 }}>
             MetDX Demo
           </Typography>
+          <EngineToggle />
           {isMockMode() && <Chip size="small" color="secondary" label="mock data" />}
           <Tooltip title="Catalogue">
             <IconButton color="inherit" component={RouterLink} to={paths.catalogue()} aria-label="Catalogue">

@@ -18,7 +18,7 @@ import {
 import GestureIcon from '@mui/icons-material/Gesture';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { COLLECTION_PARAM, DrawCancelledError, RecordLink, useMap, useRegisterFetch, useRequestBar } from '../../shell';
+import { COLLECTION_PARAM, DrawCancelledError, RecordLink, useMap, useMapEngine, useRegisterFetch, useRequestBar } from '../../shell';
 import { AbortedError, HttpError, ResponseTooLargeError, fetchJson, fetchWithJob } from '../../lib/http';
 import {
   COMMON_LEVELS,
@@ -128,6 +128,9 @@ function Section({ title, children, action }: { title: string; children: ReactNo
 function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
   const { id: recordId } = useParams();
   const map = useMap();
+  const engineName = useMapEngine()?.name ?? null;
+  const engineRef = useRef(engineName);
+  engineRef.current = engineName;
   const bar = useRequestBar();
 
   // --- collection metadata
@@ -157,7 +160,16 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
   const [drawing, setDrawing] = useState(false);
   const [status, setStatus] = useState<Status>(null);
   // The last response; its ResultPanel draws it on the map (and clears the map when it goes away).
-  const [fetched, setFetched] = useState<FetchedResult | null>(null);
+  // It belongs to the map engine it was fetched for: switching engine drops it (a new Fetch draws it on the new one).
+  const [fetchedFor, setFetchedFor] = useState<{ result: FetchedResult; engine: string | null } | null>(null);
+  const fetched = fetchedFor && fetchedFor.engine === engineName ? fetchedFor.result : null;
+  const setFetched = useCallback(
+    (r: FetchedResult | null) => setFetchedFor(r ? { result: r, engine: engineRef.current } : null),
+    [],
+  );
+  useEffect(() => {
+    setFetchedFor((cur) => (cur && cur.engine !== engineName ? null : cur));
+  }, [engineName]);
   const fetchSeq = useRef(0);
 
   const modes = useMemo(() => (info ? availableModes(info.modes) : []), [info]);

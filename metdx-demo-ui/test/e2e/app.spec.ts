@@ -1,6 +1,7 @@
-import { expect, test, type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { expect, expectMapRendered, shotName, test } from './engine';
 
 const SCREENS = process.env.SCREENSHOT_DIR ?? join(process.cwd(), 'test-results', 'screens');
 const RECORD_TITLE = 'ECMWF IFS Global Deterministic Forecast (Destination Earth)';
@@ -32,7 +33,7 @@ async function settleBasemap(page: Page) {
 
 test.beforeAll(() => mkdirSync(SCREENS, { recursive: true }));
 
-test('catalogue lists the default-query records with service badges', async ({ page }) => {
+test('catalogue lists the default-query records with service badges', async ({ page, engine }) => {
   await page.goto('/?mock=1');
   await expect(page.getByLabel('Search datasets')).toHaveValue('metdx-demo');
   await expect(page.getByTestId('result-card')).toHaveCount(3);
@@ -45,9 +46,9 @@ test('catalogue lists the default-query records with service badges', async ({ p
   await expect(msc).toBeVisible();
   await expect(msc.getByTestId('badge-edr')).toHaveCount(0);
   await expect(msc.getByTestId('badge-maps')).toHaveCount(0);
-  await expect(page.getByTestId('map').locator('canvas')).toBeVisible();
+  await expectMapRendered(page, engine);
   await settleBasemap(page);
-  await page.screenshot({ path: `${SCREENS}/catalogue.png` });
+  await page.screenshot({ path: `${SCREENS}/${shotName('catalogue', engine)}.png` });
 });
 
 test('clearing the default query lists all records', async ({ page }) => {
@@ -91,7 +92,7 @@ test('default (no ?mock): searches the catalogue for the default query through t
   ).toBe(true);
 });
 
-test('search -> record -> EDR -> draw point -> Fetch shows JSON and chart', async ({ page }) => {
+test('search -> record -> EDR -> draw point -> Fetch shows JSON and chart', async ({ page, engine }) => {
   await openRecord(page);
   await page.getByRole('link', { name: 'EDR', exact: true }).click();
   await expect(page.getByTestId('page-edr')).toBeVisible();
@@ -111,7 +112,7 @@ test('search -> record -> EDR -> draw point -> Fetch shows JSON and chart', asyn
   await page.mouse.move(0, 0);
   await settleBasemap(page);
   await page.waitForTimeout(500); // let MUI label/ripple transitions settle
-  await page.screenshot({ path: `${SCREENS}/edr.png` });
+  await page.screenshot({ path: `${SCREENS}/${shotName('edr', engine)}.png` });
 
   await page.getByRole('button', { name: 'Fetch' }).click();
   const panel = page.getByTestId('edr-result');
@@ -142,9 +143,8 @@ test('record -> Maps -> draw bbox -> Fetch puts an image overlay on the map', as
 
   await page.getByRole('button', { name: 'Fetch' }).click();
   await expect(page.getByTestId('maps-status')).toContainText('Map rendered');
-  // The overlay is an OL image layer: an <img>/<canvas> layer element appears in the viewport.
   await expect(page.getByLabel('Clear rendered map')).toBeVisible();
-  // The PNG is an OpenLayers ImageStatic layer; the map element mirrors its load state.
+  // The PNG is an image layer of the engine (OL ImageStatic / reprojected Leaflet imageOverlay); the map element mirrors its load state.
   await expect(page.getByTestId('map')).toHaveAttribute('data-overlay', 'loaded');
 
   await page.getByLabel('Clear rendered map').click();

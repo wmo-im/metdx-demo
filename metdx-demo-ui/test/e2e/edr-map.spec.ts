@@ -1,7 +1,8 @@
 // EDR results on the map (mock project): the live ECMWF samples served by mockFetch (`?mock=1`) for position, area
-// and trajectory; param/time switching, clearing and a 40k-point performance run on routed synthetic CoverageJSON.
-import { expect, test, type Page } from '@playwright/test';
-import { mkdirSync, readFileSync } from 'node:fs';
+// and trajectory (on both map engines, see engine.ts); param/time switching, clearing and a 40k-point performance run on routed synthetic CoverageJSON.
+import type { Page } from '@playwright/test';
+import { dataPixels as scanPixels, expect, findDataPixel as findPixel, shotName, test, type EngineName } from './engine';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const SCREENS = process.env.SCREENSHOT_DIR ?? join(process.cwd(), 'test-results', 'screens');
@@ -80,42 +81,11 @@ async function chooseStyle(page: Page, style: 'Contours' | 'Points') {
 }
 
 /** Counts of map pixels near the viridis colour stops (the data colours); needs {@link blockTiles}. */
-const VIRIDIS_STOPS: [number, number, number][] = [
-  [68, 1, 84],
-  [72, 40, 120],
-  [62, 74, 137],
-  [49, 104, 142],
-  [38, 130, 142],
-  [31, 158, 137],
-  [53, 183, 121],
-  [109, 205, 89],
-  [180, 222, 44],
-  [253, 231, 37],
-];
-async function dataPixels(page: Page) {
-  return page.evaluate((stops) => {
-    const hits = stops.map(() => 0);
-    let sig = 0;
-    for (const c of Array.from(document.querySelectorAll<HTMLCanvasElement>('[data-testid="map"] canvas'))) {
-      if (!c.width || !c.height) continue;
-      const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
-      for (let p = 0; p < d.length; p += 4) {
-        if (d[p + 3] < 200) continue;
-        for (let s = 0; s < stops.length; s++) {
-          const dr = d[p] - stops[s][0];
-          const dg = d[p + 1] - stops[s][1];
-          const db = d[p + 2] - stops[s][2];
-          if (dr * dr + dg * dg + db * db < 30 * 30) {
-            hits[s]++;
-            sig = (sig * 31 + p * (s + 1)) % 2147483647; // changes whenever the coloured pixels move or change class
-            break;
-          }
-        }
-      }
-    }
-    return { hits, sig, total: hits.reduce((a, b) => a + b, 0) };
-  }, VIRIDIS_STOPS);
-}
+let ENGINE: EngineName = 'ol';
+test.beforeEach(({ engine }) => {
+  ENGINE = engine;
+});
+const dataPixels = (page: Page) => scanPixels(page, ENGINE);
 
 /**
  * Arms a stopwatch for the next user action: it starts at the `startEvent` (the Fetch click, or the keydown /
@@ -171,34 +141,7 @@ async function stopProbe(page: Page) {
   });
 }
 
-/** Viewport position of a data-coloured pixel nearest the map centre (readable canvases only, see {@link blockTiles}). */
-async function findDataPixel(page: Page): Promise<{ x: number; y: number } | null> {
-  return page.evaluate((stops) => {
-    const map = document.querySelector('[data-testid="map"]')!.getBoundingClientRect();
-    const cx = map.x + map.width / 2;
-    const cy = map.y + map.height / 2;
-    let best: { x: number; y: number; d: number } | null = null;
-    for (const c of Array.from(document.querySelectorAll<HTMLCanvasElement>('[data-testid="map"] canvas'))) {
-      if (!c.width || !c.height) continue;
-      const r = c.getBoundingClientRect();
-      const k = r.width / c.width;
-      const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
-      for (let py = 0; py < c.height; py += 2) {
-        for (let px = 0; px < c.width; px += 2) {
-          const p = (py * c.width + px) * 4;
-          if (d[p + 3] < 200) continue; // contour fills are drawn at 90 % opacity
-          const hit = stops.some((s) => (d[p] - s[0]) ** 2 + (d[p + 1] - s[1]) ** 2 + (d[p + 2] - s[2]) ** 2 < 30 * 30);
-          if (!hit) continue;
-          const x = r.x + px * k;
-          const y = r.y + py * k;
-          const dist = Math.hypot(x - cx, y - cy);
-          if (!best || dist < best.d) best = { x, y, d: dist };
-        }
-      }
-    }
-    return best ? { x: best.x, y: best.y } : null;
-  }, VIRIDIS_STOPS);
-}
+const findDataPixel = (page: Page) => findPixel(page, ENGINE);
 
 /**
  * Click a drawn point and wait for the readout. OpenLayers reports `singleclick` 250 ms after the click (to tell it
@@ -289,7 +232,7 @@ test.describe('mock fixtures', () => {
     await expect(page.getByTestId('map')).toHaveAttribute('data-style', 'contours'); // area defaults to contours
     await chooseStyle(page, 'Points');
     await page.mouse.move(0, 0);
-    await page.screenshot({ path: `${SCREENS}/edr-map-area-notiles.png` });
+    await page.screenshot({ path: `${SCREENS}/${shotName('edr-map-area-notiles', ENGINE)}.png` });
     const px = await dataPixels(page);
     // 2408 discs of radius 3.5 px with a white outline (~20 coloured pixels each), in several parts of the colour ramp
     expect(px.total).toBeGreaterThan(2408 * 2);
@@ -325,7 +268,7 @@ test.describe('mock fixtures', () => {
     expect(min).toBeLessThan(max);
     await page.waitForTimeout(500);
     await page.mouse.move(0, 0);
-    await page.screenshot({ path: `${SCREENS}/edr-map-area-contours.png` });
+    await page.screenshot({ path: `${SCREENS}/${shotName('edr-map-area-contours', ENGINE)}.png` });
 
     // filled areas in several bands of the colour ramp, far more coloured pixels than 2408 discs could cover
     const filled = await dataPixels(page);
@@ -367,7 +310,7 @@ test.describe('mock fixtures', () => {
     await page.mouse.move(0, 0);
     await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
     await page.waitForTimeout(800);
-    await page.screenshot({ path: `${SCREENS}/edr-map-area.png` });
+    await page.screenshot({ path: `${SCREENS}/${shotName('edr-map-area', ENGINE)}.png` });
   });
 
   test('trajectory: 15 vertices drawn with the line, click on a vertex reads its value', async ({ page }) => {
@@ -383,7 +326,7 @@ test.describe('mock fixtures', () => {
     const px = await dataPixels(page);
     expect(px.total).toBeGreaterThan(15 * 20);
     await page.mouse.move(0, 0);
-    await page.screenshot({ path: `${SCREENS}/edr-map-trajectory-notiles.png` });
+    await page.screenshot({ path: `${SCREENS}/${shotName('edr-map-trajectory-notiles', ENGINE)}.png` });
 
     await clickDataPoint(page);
     const sel = page.getByTestId('edr-selected');
@@ -400,7 +343,7 @@ test.describe('mock fixtures', () => {
     await page.mouse.move(0, 0);
     await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
     await page.waitForTimeout(800);
-    await page.screenshot({ path: `${SCREENS}/edr-map-trajectory.png` });
+    await page.screenshot({ path: `${SCREENS}/${shotName('edr-map-trajectory', ENGINE)}.png` });
   });
 
   test('position with the basemap: screenshot of point, legend and chart', async ({ page }) => {
@@ -413,7 +356,7 @@ test.describe('mock fixtures', () => {
     await page.mouse.move(0, 0);
     await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
     await page.waitForTimeout(800);
-    await page.screenshot({ path: `${SCREENS}/edr-map-position.png` });
+    await page.screenshot({ path: `${SCREENS}/${shotName('edr-map-position', ENGINE)}.png` });
   });
 
   test('cleared when the query type changes, on a new fetch and when leaving the page', async ({ page }) => {
@@ -635,7 +578,7 @@ test.describe('param and time switching (synthetic, 1500 points x 4 times x 2 pa
     expect(px1.total).toBeGreaterThan(1500 * 5);
     expect(px1.sig).not.toBe(px0.sig);
     await expect(panel.getByTestId('legend-min')).toHaveText(minK ?? '');
-    await page.screenshot({ path: `${SCREENS}/edr-map-synthetic-time.png` });
+    await page.screenshot({ path: `${SCREENS}/${shotName('edr-map-synthetic-time', ENGINE)}.png` });
 
     // parameter: legend label, unit and range change; the readout keeps its position
     await pickParam(page, '10u');
@@ -646,7 +589,7 @@ test.describe('param and time switching (synthetic, 1500 points x 4 times x 2 pa
     await page.waitForTimeout(400);
     const px2 = await dataPixels(page);
     expect(px2.sig).not.toBe(px1.sig);
-    await page.screenshot({ path: `${SCREENS}/edr-map-synthetic-param.png` });
+    await page.screenshot({ path: `${SCREENS}/${shotName('edr-map-synthetic-param', ENGINE)}.png` });
 
     // the clicked point's series over the 4 time steps is charted
     await expect(panel.locator('svg').first()).toBeVisible();
@@ -705,11 +648,12 @@ test.describe('performance with 40000 points', () => {
 
     const probe = await stopProbe(page);
     const report = { drawMs: Math.round(drawMs), switches: Object.fromEntries(Object.entries(switches).map(([k, v]) => [k, Math.round(v)])), clickMs, ...probe };
-    console.log(`40k perf: ${JSON.stringify(report)}`);
+    console.log(`40k perf (${ENGINE}): ${JSON.stringify(report)}`);
+    writeFileSync(join(SCREENS, `perf-40k-${ENGINE}.json`), JSON.stringify(report, null, 2));
     test.info().annotations.push({ type: 'perf', description: JSON.stringify(report) });
 
     await page.mouse.move(0, 0);
-    await page.screenshot({ path: `${SCREENS}/edr-map-40k.png` });
+    await page.screenshot({ path: `${SCREENS}/${shotName('edr-map-40k', ENGINE)}.png` });
 
     expect(drawMs, 'draw from Fetch click to painted').toBeLessThan(3000);
     for (const [name, ms] of Object.entries(switches)) expect(ms, `switch: ${name}`).toBeLessThan(1000);
