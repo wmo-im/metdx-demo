@@ -11,6 +11,8 @@ import {
   rasterSize,
   type MultiPolygonCoords,
 } from './contour';
+import { parseCoverageJson } from './covjson';
+import liveAreaFrance from '../../test/fixtures/edr/live-area-france.json';
 
 /** nx × ny lattice over `[lon0, lon0 + (nx-1) dx] × [lat0, …]` with a deterministic jitter of `jitter` × spacing. */
 function lattice(nx: number, ny: number, d = 0.1, jitter = 0, lon0 = 0, lat0 = 0): Float64Array {
@@ -309,4 +311,43 @@ describe('timing', () => {
       expect(t2 - t0).toBeLessThan(budget);
     });
   }
+});
+
+describe('area across 0° (polytope delivers 0..360)', () => {
+  const layer = parseCoverageJson(liveAreaFrance);
+  const coords = layer.coords as Float64Array;
+  const param = layer.parameters[0];
+  const values = layer.values(param.key, 0);
+
+  it('triangulates into one block spanning 0°: the bbox is -5..8 and a cell at lon 0 has data', () => {
+    const tri = getTriangulation(coords);
+    expect(tri.bbox[0]).toBeCloseTo(-5, 0);
+    expect(tri.bbox[2]).toBeCloseTo(8, 0);
+    const r = interpolateToRaster(tri, coords, values, 256);
+    const col = Math.round((0 - r.x0) / r.dx);
+    const row = Math.round(((tri.bbox[1] + tri.bbox[3]) / 2 - r.y0) / r.dy);
+    expect(Number.isNaN(r.values[row * r.width + col])).toBe(false);
+    const finite = r.values.reduce((n, v) => n + (Number.isNaN(v) ? 0 : 1), 0);
+    expect(finite / r.values.length).toBeGreaterThan(0.8); // a filled block, no gap in the middle
+    // nearest() finds a point on both sides of 0°
+    const mid = (tri.bbox[1] + tri.bbox[3]) / 2;
+    expect(coords[2 * tri.nearest(-3, mid)]).toBeLessThan(-2);
+    expect(coords[2 * tri.nearest(3, mid)]).toBeGreaterThan(2);
+  });
+
+  it('contour bands have polygons on both sides of 0° and join across it', () => {
+    const set = computeContours(getTriangulation(coords), coords, values, param.min, param.max)!;
+    expect(set).not.toBeNull();
+    const lowest = set.bands.find((b) => b.coordinates.length)!;
+    const lons = lowest.coordinates.flatMap((poly) => poly.flatMap((ring) => ring.map((p) => p[0])));
+    expect(Math.min(...lons)).toBeLessThan(-4);
+    expect(Math.max(...lons)).toBeGreaterThan(7);
+    // the lowest band is one connected region (a single exterior ring crossing lon 0)
+    const crossing = lowest.coordinates.filter((poly) => {
+      const x = poly[0].map((p) => p[0]);
+      return Math.min(...x) < 0 && Math.max(...x) > 0;
+    });
+    expect(crossing.length).toBeGreaterThanOrEqual(1);
+    expect(mpArea(lowest.coordinates)).toBeGreaterThan(0.6 * 13 * (getTriangulation(coords).bbox[3] - getTriangulation(coords).bbox[1]));
+  });
 });

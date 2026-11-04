@@ -567,6 +567,39 @@ test.describe('area polygon and opacity (mock fixtures)', () => {
   });
 });
 
+test.describe('area across 0° (live polytope sample over France, longitudes 0..360)', () => {
+  test('contours are drawn as one block around 0°, the view fits across it and a click reads a point there', async ({ page }) => {
+    await blockTiles(page);
+    await routeProxy(page, () => fixture('edr/live-area-france.json'));
+    await openEdrRouted(page, 'area');
+    await drawGeometry(page, 'area');
+    await page.getByRole('button', { name: 'Fetch' }).click();
+    await expect(page.getByTestId('edr-result').getByTestId('legend')).toBeVisible();
+    await expectDrawn(page);
+    await expect(page.getByTestId('map')).toHaveAttribute('data-style', 'contours');
+    await settleView(page);
+
+    // the view was fitted to -5..8 °E (not to 0..360, which would show the whole world)
+    const [west, , east] = ((await page.getByTestId('map').getAttribute('data-view')) ?? '').split(',').map(Number);
+    expect(west).toBeLessThan(-3);
+    expect(east).toBeGreaterThan(6);
+    expect(east - west).toBeLessThan(60);
+    expect(Math.abs(west + east)).toBeLessThan(25); // centred near 0°, not near 180°
+
+    await page.waitForTimeout(300);
+    const px = await dataPixels(page);
+    expect(px.total).toBeGreaterThan(40_000);
+
+    // a click on the data reads a point between -5 and 8 °E
+    await clickDataPoint(page);
+    const sel = (await page.getByTestId('edr-selected').textContent()) ?? '';
+    const lon = Number(/(-?[\d.]+)°E/.exec(sel)?.[1]);
+    expect(lon).toBeGreaterThanOrEqual(-5.5);
+    expect(lon).toBeLessThanOrEqual(8.5);
+    await page.mouse.move(0, 0);
+  });
+});
+
 test.describe('param and time switching (synthetic, 1500 points x 4 times x 2 parameters)', () => {
   test('pickers redraw: legend, colours and the clicked value change', async ({ page }) => {
     await blockTiles(page);

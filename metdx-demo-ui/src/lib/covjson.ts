@@ -5,7 +5,8 @@
  * - axes named `latitude` / `longitude` / `levelist` instead of `y` / `x` / `z`;
  * - a `composite` tuple axis whose element order comes from its `coordinates` (lat-lon, not x-y);
  * - range `axisNames` that are wrong (e.g. `["2t"]`): the order is then derived from the domain;
- * - `domainType` only on the collection (inherited by its coverages).
+ * - `domainType` only on the collection (inherited by its coverages);
+ * - longitudes in 0..360 (polytope): made contiguous per layer, see {@link chooseLonShift}.
  *
  * Output follows the contract in `covjsonTypes.ts`. Inputs above {@link MAX_POINTS} /
  * {@link MAX_GRID_CELLS} throw {@link TooLargeToDraw}; shapes this parser cannot draw throw
@@ -245,6 +246,8 @@ interface Part {
   ny: number;
   flipX: boolean;
   flipY: boolean;
+  /** Grid only: source x index of each output column, when the (wrapped) x axis had to be re-ordered. */
+  xIndex?: Int32Array;
 }
 
 function strictOrder(key: string, v: number[]): 'asc' | 'desc' {
@@ -266,6 +269,39 @@ function requireUniform(v: number[]): void {
   for (let i = 1; i < v.length; i++) {
     if (Math.abs(v[i] - v[i - 1] - step) > tol) throw new CovJsonError('non-uniform grid not supported');
   }
+}
+
+/** Wrap `lon` to `[-180, 180)` (`'a'`) or `[0, 360)` (`'b'`). */
+function wrapLon(lon: number, conv: 'a' | 'b'): number {
+  const lo = conv === 'a' ? -180 : 0;
+  return lon - 360 * Math.floor((lon - lo) / 360);
+}
+
+/**
+ * Longitude convention that keeps a set of longitudes contiguous: the data is kept as delivered unless wrapping it to
+ * `[-180, 180)` (`'a'`) or `[0, 360)` (`'b'`) gives a smaller west–east span. An area over France returned in 0..360
+ * (0..8 and 355..360) becomes -5..8; an area over the dateline stays 170..190; a global grid is left alone.
+ */
+function chooseLonShift(lons: ArrayLike<number>, stride = 1, offset = 0): 'keep' | 'a' | 'b' {
+  const lim = () => [Infinity, -Infinity];
+  const o = lim();
+  const a = lim();
+  const b = lim();
+  for (let i = offset; i < lons.length; i += stride) {
+    const v = lons[i];
+    const va = wrapLon(v, 'a');
+    const vb = wrapLon(v, 'b');
+    if (v < o[0]) o[0] = v;
+    if (v > o[1]) o[1] = v;
+    if (va < a[0]) a[0] = va;
+    if (va > a[1]) a[1] = va;
+    if (vb < b[0]) b[0] = vb;
+    if (vb > b[1]) b[1] = vb;
+  }
+  const span = (r: number[]) => r[1] - r[0];
+  const best = Math.min(span(a), span(b));
+  if (!(span(o) > best + 1e-9)) return 'keep'; // empty, or already as compact as it gets
+  return span(a) <= span(b) ? 'a' : 'b';
 }
 
 function numericAxis(a: Axis): number[] {
@@ -298,11 +334,11 @@ function extract(part: Part, p: { raw: unknown[]; dims: Dim[] }, grid: boolean, 
   const raw = p.raw;
   const num = (v: unknown): number => (typeof v === 'number' ? v : v === null || v === undefined ? NaN : Number(v));
   if (grid) {
-    const { nx, ny, flipX, flipY } = part;
+    const { nx, ny, flipX, flipY, xIndex } = part;
     for (let j = 0; j < ny; j++) {
       const rj = base + (flipY ? ny - 1 - j : j) * stY;
       const row = j * nx;
-      for (let i = 0; i < nx; i++) out[row + i] = num(raw[rj + (flipX ? nx - 1 - i : i) * stX]);
+      for (let i = 0; i < nx; i++) out[row + i] = num(raw[rj + (xIndex ? xIndex[i] : flipX ? nx - 1 - i : i) * stX]);
     }
   } else {
     for (let s = 0; s < part.spatial; s++) out[s] = num(raw[base + s * stC]);
@@ -395,7 +431,7 @@ export function parseCoverageJson(json: unknown, options: ParseOptions = {}): Co
   const parts: Part[] = [];
   let total = 0;
 
-  const makePart = (c: Cov, spatial: number, g: Pick<Part, 'nx' | 'ny' | 'flipX' | 'flipY'>): Part => {
+  const makePart = (c: Cov, spatial: number, g: Pick<Part, 'nx' | 'ny' | 'flipX' | 'flipY' | 'xIndex'>): Part => {
     const compTimes = c.kind === 'trajectory' && !!c.axes.c?.tuple?.includes('t');
     const n = compTimes ? 1 : Math.max(c.axes.t?.length ?? 0, 1);
     if (n !== nTimes) throw new CovJsonError('Coverages with different time axes cannot be combined');
@@ -416,16 +452,33 @@ export function parseCoverageJson(json: unknown, options: ParseOptions = {}): Co
 
   if (kind === 'grid') {
     const c = covs[0];
-    const xv = numericAxis(c.axes.x!);
+    let xv = numericAxis(c.axes.x!);
     const yv = numericAxis(c.axes.y!);
-    const flipX = strictOrder(c.axes.x!.key, xv) === 'desc';
+    // Longitudes in 0..360 that cross 0° (e.g. 354 … 358, 0 … 8): wrap, then re-order west to east.
+    let xIndex: Int32Array | undefined;
+    let flipX: boolean;
+    const conv = chooseLonShift(xv);
+    const wrapped = conv === 'keep' ? undefined : xv.map((v) => wrapLon(v, conv));
+    const order = wrapped && Array.from(wrapped.keys()).sort((i, j) => wrapped[i] - wrapped[j]);
+    if (wrapped && order && order.every((_, n) => n === 0 || wrapped[order[n]] > wrapped[order[n - 1]])) {
+      xv = order.map((k) => wrapped[k]);
+      xIndex = Int32Array.from(order);
+      flipX = false;
+      if (xIndex.every((k, n) => k === n)) xIndex = undefined;
+      else if (xIndex.every((k, n) => k === xIndex!.length - 1 - n)) {
+        xIndex = undefined;
+        flipX = true;
+      }
+    } else {
+      flipX = strictOrder(c.axes.x!.key, xv) === 'desc'; // (also when wrapping would merge columns: keep as delivered)
+      if (flipX) xv.reverse();
+    }
     const flipY = strictOrder(c.axes.y!.key, yv) === 'desc';
     requireUniform(xv);
     requireUniform(yv);
-    if (flipX) xv.reverse();
     if (flipY) yv.reverse();
     coords = { x: Float64Array.from(xv), y: Float64Array.from(yv) };
-    parts.push(makePart(c, xv.length * yv.length, { nx: xv.length, ny: yv.length, flipX, flipY }));
+    parts.push(makePart(c, xv.length * yv.length, { nx: xv.length, ny: yv.length, flipX, flipY, xIndex }));
     total = xv.length * yv.length;
   } else {
     for (const c of covs) total += c.axes.c ? c.axes.c.length : 1;
@@ -464,6 +517,9 @@ export function parseCoverageJson(json: unknown, options: ParseOptions = {}): Co
       parts.push(makePart(c, n, { nx: 0, ny: 0, flipX: false, flipY: false }));
       at += n;
     }
+    // One convention for the whole layer, so that the points of an area over 0° / 180° lie side by side.
+    const conv = chooseLonShift(xy, 2, 0);
+    if (conv !== 'keep') for (let i = 0; i < xy.length; i += 2) xy[i] = wrapLon(xy[i], conv);
     coords = xy;
   }
 

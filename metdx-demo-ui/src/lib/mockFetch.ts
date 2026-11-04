@@ -20,7 +20,12 @@
  */
 import { proxyUrl, setFetchImpl, unproxyUrl, type FetchImpl } from './http';
 
-const jsonFixtures = import.meta.glob('../../test/fixtures/**/*.json', { import: 'default' }) as Record<
+// Only fixtures that mock mode serves are bundled. Test-only fixtures (read directly by unit tests or
+// Playwright routes) are excluded here so they stay out of the production build.
+const jsonFixtures = import.meta.glob(
+  ['../../test/fixtures/**/*.json', '!../../test/fixtures/edr/live-area-france.json'],
+  { import: 'default' },
+) as Record<
   string,
   () => Promise<unknown>
 >;

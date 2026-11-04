@@ -3,6 +3,7 @@ import { CovJsonError, parseCoverageJson, pointSeries } from './covjson';
 import { MAX_GRID_CELLS, MAX_POINTS, TooLargeToDraw, isGridSpec, type GridSpec } from './covjsonTypes';
 import livePosition from '../../test/fixtures/edr/live-position.json';
 import liveArea from '../../test/fixtures/edr/live-area.json';
+import liveAreaFrance from '../../test/fixtures/edr/live-area-france.json';
 import liveTrajectory from '../../test/fixtures/edr/live-trajectory.json';
 
 const grid = (l: { coords: unknown }) => l.coords as GridSpec;
@@ -351,5 +352,99 @@ describe('limits and performance', () => {
     const v = l.values('T', 0);
     expect(v).toHaveLength(n * n);
     expect(v[0]).toBe((n - 1) * n); // y flipped: the first output row is the last raw row
+  });
+});
+
+/** MultiPoint coverage with a lat-lon composite axis; `lons[k]` has value `k`. */
+function multiPoint(lons: number[]) {
+  return {
+    type: 'Coverage',
+    domain: {
+      type: 'Domain',
+      domainType: 'MultiPoint',
+      axes: { composite: { dataType: 'tuple', coordinates: ['latitude', 'longitude'], values: lons.map((lon, k) => [45 + (k % 3), lon]) } },
+    },
+    ranges: { T: { type: 'NdArray', dataType: 'float', axisNames: ['composite'], shape: [lons.length], values: lons.map((_, k) => k) } },
+  };
+}
+const lonsOf = (l: { coords: unknown }) => Array.from(l.coords as Float64Array).filter((_, i) => i % 2 === 0);
+
+describe('longitudes across 0° and 180°', () => {
+  it('live area over France (polytope, 0..360): no longitude above 180, -5..8, count unchanged', () => {
+    const raw = (liveAreaFrance as any).coverages[0].domain.axes.composite.values as number[][];
+    expect(raw.some((t) => t[1] > 180)).toBe(true); // the sample really is in 0..360
+    const l = parseCoverageJson(liveAreaFrance);
+    const lons = lonsOf(l);
+    expect(lons).toHaveLength(raw.length);
+    expect(lons.length).toBeGreaterThan(10_000);
+    expect(Math.max(...lons)).toBeLessThan(9);
+    expect(Math.min(...lons)).toBeGreaterThan(-6);
+    expect(Math.min(...lons)).toBeCloseTo(-5, 0);
+    expect(Math.max(...lons)).toBeCloseTo(8, 0);
+    // each point keeps its own value, latitude and the same longitude modulo 360
+    const c = l.coords as Float64Array;
+    raw.forEach((t, k) => {
+      expect(c[2 * k + 1]).toBe(t[0]);
+      expect((((c[2 * k] - t[1]) % 360) + 360) % 360).toBeCloseTo(0, 9);
+    });
+  });
+
+  it('points 355..360 and 0..8 become -5..8, in the original order', () => {
+    expect(lonsOf(parseCoverageJson(multiPoint([356, 358, 0, 4, 8])))).toEqual([-4, -2, 0, 4, 8]);
+  });
+
+  it('a dateline-crossing area stays contiguous (170..190)', () => {
+    expect(lonsOf(parseCoverageJson(multiPoint([170, 180, 190])))).toEqual([170, 180, 190]);
+  });
+
+  it('a dateline area delivered as -180..180 becomes contiguous in 0..360', () => {
+    expect(lonsOf(parseCoverageJson(multiPoint([170, 179, -179, -170])))).toEqual([170, 179, 181, 190]);
+  });
+
+  it('data that is already compact is left as delivered', () => {
+    expect(lonsOf(parseCoverageJson(multiPoint([-10, 0, 10, 180])))).toEqual([-10, 0, 10, 180]);
+    expect(lonsOf(parseCoverageJson(multiPoint([200, 210, 220])))).toEqual([200, 210, 220]);
+  });
+
+  it('a trajectory 350 -> 10 crosses 0° as -10 -> 10', () => {
+    const l = parseCoverageJson({
+      type: 'Coverage',
+      domain: {
+        type: 'Domain',
+        domainType: 'Trajectory',
+        axes: { composite: { dataType: 'tuple', coordinates: ['t', 'x', 'y'], values: [['a', 350, 40], ['b', 355, 41], ['c', 5, 42], ['d', 10, 43]] } },
+      },
+      ranges: { T: { type: 'NdArray', dataType: 'float', axisNames: ['composite'], shape: [4], values: [1, 2, 3, 4] } },
+    });
+    expect(l.kind).toBe('trajectory');
+    expect(lonsOf(l)).toEqual([-10, -5, 5, 10]);
+  });
+
+  it('a grid in 0..360 that crosses 0° is re-ordered west to east with its values', () => {
+    // x = 354, 356, 358, 0, 2, 4 ; two rows
+    const l = parseCoverageJson(
+      stdGrid({}, { x: { values: [354, 356, 358, 0, 2, 4] } }, { shape: [2, 6], values: [1, 2, 3, 4, 5, 6, 11, 12, 13, 14, 15, 16] }),
+    );
+    expect(arr(grid(l).x)).toEqual([-6, -4, -2, 0, 2, 4]);
+    expect(arr(l.values('T', 0))).toEqual([1, 2, 3, 4, 5, 6, 11, 12, 13, 14, 15, 16]);
+    // sorted 0..360 delivery: 0 2 4 354 356 358
+    const m = parseCoverageJson(
+      stdGrid({}, { x: { values: [0, 2, 4, 354, 356, 358] } }, { shape: [2, 6], values: [1, 2, 3, 4, 5, 6, 11, 12, 13, 14, 15, 16] }),
+    );
+    expect(arr(grid(m).x)).toEqual([-6, -4, -2, 0, 2, 4]);
+    expect(arr(m.values('T', 0))).toEqual([4, 5, 6, 1, 2, 3, 14, 15, 16, 11, 12, 13]);
+    // descending, wrapping
+    const d = parseCoverageJson(stdGrid({}, { x: { values: [4, 2, 0, 358, 356, 354] } }, { shape: [2, 6], values: [1, 2, 3, 4, 5, 6, 11, 12, 13, 14, 15, 16] }));
+    expect(arr(grid(d).x)).toEqual([-6, -4, -2, 0, 2, 4]);
+    expect(arr(d.values('T', 0))).toEqual([6, 5, 4, 3, 2, 1, 16, 15, 14, 13, 12, 11]);
+  });
+
+  it('global grids (0..357.5, -180..180) and plain grids are unchanged', () => {
+    const xs = Array.from({ length: 144 }, (_, i) => i * 2.5);
+    const l = parseCoverageJson(stdGrid({}, { x: { values: xs } }, { shape: [2, 144], values: Array.from({ length: 288 }, (_, i) => i) }));
+    expect(arr(grid(l).x)).toEqual(xs);
+    expect(l.values('T', 0)[0]).toBe(0);
+    const closed = Array.from({ length: 145 }, (_, i) => -180 + i * 2.5);
+    expect(arr(grid(parseCoverageJson(stdGrid({}, { x: { values: closed } }, { shape: [2, 145], values: new Array(290).fill(1) }))).x)).toEqual(closed);
   });
 });
