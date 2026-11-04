@@ -15,6 +15,26 @@ export class DrawCancelledError extends Error {
   }
 }
 
+/** The whole world (Web Mercator's usable latitudes): the initial map view. */
+export const WORLD_BBOX: BBox = [-180, -85, 180, 85];
+
+/** Lowest map zoom of both engines: negative, so the whole world fits a map shorter than 256 px. Basemap tiles start at zoom 0. */
+export const MIN_ZOOM = -4;
+
+/** Highest zoom {@link ExtentOptions.fit} zooms to (before zooming out): a point footprint is not shown at street level. */
+export const EXTENT_FIT_MAX_ZOOM = 8;
+
+/** Options of {@link MapApi.showExtent}. */
+export interface ExtentOptions {
+  /**
+   * Also move the view to the extent: zoom to it (at most {@link EXTENT_FIT_MAX_ZOOM}), then out by `padLevels` so the
+   * surroundings show. Never zooms out further than the whole world (a world-wide extent just shows the world).
+   */
+  fit?: boolean;
+  /** Zoom levels to zoom out after fitting (default 1). */
+  padLevels?: number;
+}
+
 /** The map API shared with the pages (via `useMap`). */
 export interface MapApi {
   /** Let the user draw a geometry on the map; resolves in lon/lat. `bbox` yields a rectangle Polygon. */
@@ -25,8 +45,8 @@ export interface MapApi {
   clear(): void;
   /** Show a geometry (e.g. the current query) without drawing; `null` hides it. */
   showGeometry(geometry: Geometry | null): void;
-  /** Outline a collection extent (orange); `null` hides it. */
-  showExtent(bbox: BBox | null): void;
+  /** Outline a collection extent (orange); `null` hides it. With `opts.fit` the view moves to it (see {@link ExtentOptions}). */
+  showExtent(bbox: BBox | null, opts?: ExtentOptions): void;
   /**
    * Draw a normalised CoverageJSON result (points, trajectory or grid) coloured by `opts.param` at
    * `opts.timeIndex`, and zoom to its extent. Calling again with the same `layer` only recolours

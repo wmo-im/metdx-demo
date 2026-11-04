@@ -14,7 +14,7 @@ import LineString from 'ol/geom/LineString';
 import Point from 'ol/geom/Point';
 import MultiPolygon from 'ol/geom/MultiPolygon';
 import type SimpleGeometry from 'ol/geom/SimpleGeometry';
-import { fromLonLat, toLonLat } from 'ol/proj';
+import { fromLonLat, toLonLat, transformExtent } from 'ol/proj';
 import type { BBox, DrawKind, Geometry, Position } from '../lib/types';
 import type { MapBrowserEvent } from 'ol';
 import type { EventsKey } from 'ol/events';
@@ -30,7 +30,16 @@ import {
   type ShowDataOptions,
 } from '../lib/covjsonTypes';
 import { bandColour, computeContours, contourSupport, getTriangulation, type ContourSet } from '../lib/contour';
-import { DrawCancelledError, type MapApi, type MapCapabilities, type MapEngine } from './mapApi';
+import {
+  DrawCancelledError,
+  EXTENT_FIT_MAX_ZOOM,
+  MIN_ZOOM,
+  WORLD_BBOX,
+  type ExtentOptions,
+  type MapApi,
+  type MapCapabilities,
+  type MapEngine,
+} from './mapApi';
 import 'ol/ol.css';
 
 /**
@@ -199,6 +208,8 @@ export class MapController implements MapApi, MapEngine {
   private map: Map | null = null;
   private readonly overlayLayer = new ImageLayer({ zIndex: 5, opacity: 0.8 });
   private readonly extentSource = new VectorSource();
+  /** An extent to fit that was requested before the map existed: applied on attach. */
+  private pendingFit: { bbox: BBox; padLevels: number } | null = null;
   private readonly geometrySource = new VectorSource();
   private readonly drawnSource = new VectorSource();
   private draw: Draw | null = null;
@@ -252,14 +263,22 @@ export class MapController implements MapApi, MapEngine {
     this.map = new Map({
       target,
       layers: [
-        new TileLayer({ source: new XYZ({ url: BASEMAP_URL, attributions: ATTRIBUTION, maxZoom: 19 }) }),
+        new TileLayer({ source: new XYZ({ url: BASEMAP_URL, attributions: ATTRIBUTION, minZoom: 0, maxZoom: 19 }) }),
         this.overlayLayer,
         new VectorLayer({ source: this.extentSource, style: extentStyle, zIndex: 10 }),
         new VectorLayer({ source: this.geometrySource, style: geometryStyle, zIndex: 11 }),
         new VectorLayer({ source: this.drawnSource, style: geometryStyle, zIndex: 12 }),
       ],
-      view: new View({ center: fromLonLat([10, 50]), zoom: 3 }),
+      // multiWorld: lets the whole world fit a map that is wider than tall (otherwise the view cannot zoom out past
+      // filling the viewport with the world, which cuts off the poles); the world repeats sideways, as in Leaflet.
+      // The centre / zoom are a fallback: fitWorld() replaces them once the map has a size.
+      // minZoom: negative, so the world also fits a short map (about 256 px tall is the world at zoom 0); the tile source
+      // itself starts at zoom 0 (no tile requests below it, the tiles are just scaled down).
+      view: new View({ center: fromLonLat([10, 50]), zoom: 3, multiWorld: true, minZoom: MIN_ZOOM }),
     });
+    this.fitWorld();
+    if (this.pendingFit) this.fitExtent(this.pendingFit.bbox, this.pendingFit.padLevels);
+    this.map.on('moveend', () => this.markView());
     this.map.addLayer(this.dataImageLayer);
     this.map.addLayer(this.dataContourLayer);
     this.map.addLayer(this.dataLineLayer);
@@ -274,6 +293,7 @@ export class MapController implements MapApi, MapEngine {
     this.cancel();
     if (this.clickKey) unByKey(this.clickKey);
     this.clickKey = null;
+    this.map?.getTargetElement()?.removeAttribute('data-view');
     this.map?.setTarget(undefined);
     this.map = null;
   }
@@ -360,13 +380,17 @@ export class MapController implements MapApi, MapEngine {
     if (geometry) this.geometrySource.addFeature(new Feature(toOl(geometry)));
   }
 
-  showExtent(bbox: BBox | null): void {
+  showExtent(bbox: BBox | null, opts: ExtentOptions = {}): void {
     this.extentSource.clear();
-    if (bbox) {
-      const poly = fromExtent(bbox);
-      poly.transform('EPSG:4326', 'EPSG:3857');
-      this.extentSource.addFeature(new Feature(poly));
-    }
+    this.pendingFit = null;
+    if (!bbox) return;
+    const poly = fromExtent(bbox);
+    poly.transform('EPSG:4326', 'EPSG:3857');
+    this.extentSource.addFeature(new Feature(poly));
+    if (!opts.fit) return;
+    const padLevels = Math.max(0, opts.padLevels ?? 1);
+    if (this.map) this.fitExtent(bbox, padLevels);
+    else this.pendingFit = { bbox, padLevels };
   }
 
   showData(layer: DataLayer, opts: ShowDataOptions): void {
@@ -687,6 +711,7 @@ export class MapController implements MapApi, MapEngine {
     this.drawnSource.clear();
     this.geometrySource.clear();
     this.extentSource.clear();
+    this.pendingFit = null;
     this.overlayLayer.setSource(null);
     this.markOverlay(null);
   }
@@ -705,4 +730,56 @@ export class MapController implements MapApi, MapEngine {
     const ext = [...fromLonLat([w, lat(s)]), ...fromLonLat([e, lat(n)])];
     this.map.getView().fit(ext, { padding: [20, 20, 20, 20], duration: 250, maxZoom: 10 });
   }
+
+  /** Map size in CSS pixels, or null when the map has no area yet (hidden / not laid out). */
+  private size(): [number, number] | null {
+    const el = this.map?.getTargetElement();
+    const size = this.map?.getSize() ?? (el ? [el.clientWidth, el.clientHeight] : undefined);
+    return size && size[0] > 0 && size[1] > 0 ? [size[0], size[1]] : null;
+  }
+
+  /** Initial view: the whole world ({@link WORLD_BBOX}) fitted to the map size. */
+  private fitWorld(): void {
+    const view = this.map?.getView();
+    const size = this.size();
+    if (!view || !size) return; // not laid out yet: keep the fallback view of attach()
+    view.fit(mercatorExtent(WORLD_BBOX), { size });
+    this.markView();
+  }
+
+  /**
+   * Zoom so `bbox` fills the map (at most zoom {@link EXTENT_FIT_MAX_ZOOM}), then out by `padLevels`, but never
+   * further out than the whole world. No animation: the view is final when this returns.
+   */
+  private fitExtent(bbox: BBox, padLevels: number): void {
+    const view = this.map?.getView();
+    const size = this.size();
+    if (!view || !size) return;
+    const worldRes = view.getResolutionForExtent(mercatorExtent(WORLD_BBOX), size);
+    const fitRes = Math.max(view.getResolutionForExtent(mercatorExtent(bbox), size), view.getResolutionForZoom(EXTENT_FIT_MAX_ZOOM));
+    const ext = mercatorExtent(bbox);
+    view.setCenter([(ext[0] + ext[2]) / 2, (ext[1] + ext[3]) / 2]);
+    view.setResolution(Math.min(fitRes * 2 ** padLevels, Math.max(worldRes, fitRes)));
+    this.markView();
+  }
+
+  /** Mirrors the visible lon/lat extent as `data-view="west,south,east,north"` on the map element (tests / automation). */
+  private markView(): void {
+    const el = this.map?.getTargetElement();
+    const size = this.size();
+    const view = this.map?.getView();
+    if (!el || !view || !size) return;
+    const [w, s, e, n] = transformExtent(view.calculateExtent(size), 'EPSG:3857', 'EPSG:4326');
+    // rounded outwards (to 0.001°): float noise must not make an exactly fitted extent look just outside the view
+    const lo = (v: number) => Math.floor(v * 1e3) / 1e3;
+    const hi = (v: number) => Math.ceil(v * 1e3) / 1e3;
+    el.setAttribute('data-view', [lo(w), lo(Math.max(-90, s)), hi(e), hi(Math.min(90, n))].join(','));
+  }
+}
+
+/** `bbox` (EPSG:4326, latitudes clamped to Web Mercator's range) as an EPSG:3857 extent. */
+function mercatorExtent(bbox: BBox): number[] {
+  const [w, s, e, n] = bbox;
+  const lat = (v: number) => Math.max(-85, Math.min(85, v));
+  return [...fromLonLat([w, lat(s)]), ...fromLonLat([e, lat(n)])];
 }

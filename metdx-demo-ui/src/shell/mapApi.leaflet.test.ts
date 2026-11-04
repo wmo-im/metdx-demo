@@ -5,6 +5,11 @@ import { vi } from 'vitest';
 vi.hoisted(() => {
   const proto = SVGSVGElement.prototype as unknown as { createSVGRect?: () => object };
   proto.createSVGRect ??= () => ({});
+  // Leaflet only allows fractional zoom levels (`zoomSnap`) where it detects 3D transforms (a real browser, not jsdom); the
+  // fit-the-world tests on a short map need one, so let it detect them.
+  (window as unknown as { WebKitCSSMatrix?: unknown }).WebKitCSSMatrix ??= class {
+    m11 = 1;
+  };
 });
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';

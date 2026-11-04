@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DrawCancelledError, type MapEngine } from './mapApi';
+import type { BBox } from '../lib/types';
 import { VIRIDIS, type DataLayer, type GridSpec, type ParamInfo } from '../lib/covjsonTypes';
 
 /**
  * Engine-neutral conformance suite for {@link MapEngine} implementations (run it from `mapApi.<engine>.test.ts`).
  * It only uses the public contract and the `data-*` attributes mirrored on the map element
- * (`data-overlay`, `data-data`, `data-style`, `data-opacity`), never the engine's own objects.
+ * (`data-overlay`, `data-data`, `data-style`, `data-opacity`, `data-view`), never the engine's own objects.
  */
 export interface ConformanceOptions {
   /** Also run the data-layer tests (showData / clearData / onDataSelect). Default true. */
@@ -50,6 +51,14 @@ export function runMapConformance(name: string, create: () => MapEngine, options
     let engine: MapEngine;
     let el: HTMLDivElement;
     const attach = () => engine.attach(el);
+    /** jsdom has no layout: give the element the size its style asks for (the engines read it to fit the view). */
+    const sizeEl = (width: number, height: number) => {
+      el.style.width = `${width}px`;
+      el.style.height = `${height}px`;
+      for (const [prop, value] of [['clientWidth', width], ['offsetWidth', width], ['clientHeight', height], ['offsetHeight', height]] as const) {
+        Object.defineProperty(el, prop, { value, configurable: true });
+      }
+    };
 
     beforeEach(() => {
       // jsdom has no canvas 2D context: minimal recording stand-ins so grid painting can run.
@@ -65,8 +74,7 @@ export function runMapConformance(name: string, create: () => MapEngine, options
       vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockImplementation(() => 'data:image/png;base64,AAAA');
       engine = create();
       el = document.createElement('div');
-      el.style.width = '400px';
-      el.style.height = '300px';
+      sizeEl(400, 300);
       document.body.appendChild(el);
     });
     afterEach(() => {
@@ -139,6 +147,116 @@ export function runMapConformance(name: string, create: () => MapEngine, options
           engine.api.showExtent([-20, -10, 20, 10]);
           engine.api.showExtent(null);
         }).not.toThrow();
+      });
+    });
+
+    describe('view', () => {
+      /** The visible [west, south, east, north] mirrored as `data-view`. */
+      const view = (): BBox => {
+        const v = el.getAttribute('data-view');
+        expect(v).toMatch(/^-?[\d.]+(,-?[\d.]+){3}$/);
+        return v!.split(',').map(Number) as BBox;
+      };
+      const contains = (v: BBox, b: BBox) => v[0] <= b[0] && v[1] <= b[1] && v[2] >= b[2] && v[3] >= b[3];
+
+      it('starts on the whole world', () => {
+        attach();
+        const v = view();
+        expect(contains(v, [-180, -85, 180, 85])).toBe(true);
+        expect(v[2] - v[0]).toBeLessThan(720); // not zoomed out beyond the world and its neighbours
+      });
+
+      it('showExtent without fit leaves the view alone', () => {
+        attach();
+        const before = el.getAttribute('data-view');
+        engine.api.showExtent([-10, 40, 10, 50]);
+        expect(el.getAttribute('data-view')).toBe(before);
+      });
+
+      it('showExtent with fit zooms to the extent and out by one level: it contains the extent with room around it', () => {
+        attach();
+        const bbox: BBox = [-10, 40, 10, 50];
+        engine.api.showExtent(bbox, { fit: true });
+        const v = view();
+        expect(contains(v, bbox)).toBe(true);
+        expect(v[2] - v[0]).toBeGreaterThan(20); // wider than the extent: context around it
+        expect(v[2] - v[0]).toBeLessThan(360); // but zoomed in on it
+        // one level further out than the fit shows (at least) twice the extent's width, and no more than four times
+        expect(v[2] - v[0]).toBeLessThanOrEqual(20 * 4 * 1.01);
+      });
+
+      it('padLevels sets how far to zoom out (0: just fit)', () => {
+        attach();
+        const bbox: BBox = [-10, 40, 10, 50];
+        engine.api.showExtent(bbox, { fit: true, padLevels: 0 });
+        const fitted = view();
+        engine.api.showExtent(bbox, { fit: true, padLevels: 2 });
+        const out = view();
+        expect(contains(fitted, bbox)).toBe(true);
+        expect(out[2] - out[0]).toBeGreaterThan(fitted[2] - fitted[0]);
+      });
+
+      it('a point footprint is not zoomed to street level', () => {
+        attach();
+        engine.api.showExtent([5, 45, 5, 45], { fit: true });
+        const v = view();
+        expect(contains(v, [5, 45, 5, 45])).toBe(true);
+        expect(v[2] - v[0]).toBeGreaterThan(1);
+      });
+
+      it('a world-wide footprint just shows the world', () => {
+        attach();
+        engine.api.showExtent([-180, -90, 180, 90], { fit: true });
+        const v = view();
+        expect(contains(v, [-180, -85, 180, 85])).toBe(true);
+        expect(v[2] - v[0]).toBeLessThan(720);
+      });
+
+      it('an extent fitted before attach is applied once the map exists', () => {
+        engine.api.showExtent([-10, 40, 10, 50], { fit: true });
+        attach();
+        const v = view();
+        expect(contains(v, [-10, 40, 10, 50])).toBe(true);
+        expect(v[2] - v[0]).toBeLessThan(360);
+      });
+
+      it('clear() forgets an extent that was waiting for the map', () => {
+        engine.api.showExtent([-10, 40, 10, 50], { fit: true });
+        engine.api.clear();
+        attach();
+        expect(contains(view(), [-180, -85, 180, 85])).toBe(true);
+        expect(view()[2] - view()[0]).toBeGreaterThan(360);
+      });
+    });
+
+    describe('view on a short map (400 x 200 px: the world is taller than the map at zoom 0)', () => {
+      beforeEach(() => sizeEl(400, 200));
+      const view = (): BBox => el.getAttribute('data-view')!.split(',').map(Number) as BBox;
+      const contains = (v: BBox, b: BBox) => v[0] <= b[0] && v[1] <= b[1] && v[2] >= b[2] && v[3] >= b[3];
+
+      it('starts on the whole world, poles included', () => {
+        attach();
+        const v = view();
+        expect(contains(v, [-180, -85, 180, 85])).toBe(true);
+        expect(v[2] - v[0]).toBeLessThan(800); // fitted, not zoomed out far beyond the world
+      });
+
+      it('a world-wide footprint shows the whole world', () => {
+        attach();
+        engine.api.showExtent([-180, -90, 180, 90], { fit: true });
+        const v = view();
+        expect(contains(v, [-180, -85, 180, 85])).toBe(true);
+        expect(v[2] - v[0]).toBeLessThan(800);
+      });
+
+      it('a regional footprint is fitted with context and stays inside the world view', () => {
+        attach();
+        const world = view();
+        engine.api.showExtent([-10, 40, 10, 50], { fit: true });
+        const v = view();
+        expect(contains(v, [-10, 40, 10, 50])).toBe(true);
+        expect(v[2] - v[0]).toBeGreaterThan(20);
+        expect(v[2] - v[0]).toBeLessThan(world[2] - world[0]);
       });
     });
 

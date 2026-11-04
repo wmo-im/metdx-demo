@@ -2,7 +2,16 @@ import * as L from 'leaflet';
 import '@geoman-io/leaflet-geoman-free'; // needs the global `L` that Leaflet's UMD build sets; keep it after the Leaflet import
 import type { BBox, DrawKind, Geometry, Position } from '../../lib/types';
 import type { DataLayer, DataSelectHandler, ShowDataOptions } from '../../lib/covjsonTypes';
-import { DrawCancelledError, type MapApi, type MapCapabilities, type MapEngine } from '../mapApi';
+import {
+  DrawCancelledError,
+  EXTENT_FIT_MAX_ZOOM,
+  MIN_ZOOM,
+  WORLD_BBOX,
+  type ExtentOptions,
+  type MapApi,
+  type MapCapabilities,
+  type MapEngine,
+} from '../mapApi';
 import { renderCoverage, type CoverageHandle } from './coverageHook';
 import { LeafletDataLayers } from './data';
 import { mercatorBounds, reprojectImage } from './reproject';
@@ -51,6 +60,13 @@ const POINT_MARKER: L.CircleMarkerOptions = {
   fillOpacity: 1,
   interactive: false,
 };
+
+/** `bbox` (west, south, east, north; latitudes clamped to Web Mercator's range) as Leaflet bounds. */
+function latLngBounds(bbox: BBox): L.LatLngBounds {
+  const [w, s, e, n] = bbox;
+  const lat = (v: number) => Math.max(-85, Math.min(85, v));
+  return L.latLngBounds([lat(s), w], [lat(n), e]);
+}
 
 const round = (n: number): number => Math.round(n * 1e5) / 1e5;
 const clampLon = (lon: number): number => Math.min(180, Math.max(-180, lon));
@@ -124,6 +140,8 @@ export class LeafletController implements MapApi, MapEngine {
   private readonly overlayGroup = L.layerGroup();
   private readonly dataLayers = new LeafletDataLayers();
   private cancelDraw: (() => void) | null = null;
+  /** An extent to fit that was requested before the map existed: applied on attach. */
+  private pendingFit: { bbox: BBox; padLevels: number } | null = null;
 
   /** The overlay being loaded / shown; `overlaySeq` invalidates stale image loads. */
   private overlayImage: HTMLImageElement | null = null;
@@ -143,8 +161,8 @@ export class LeafletController implements MapApi, MapEngine {
   /** Create the Leaflet map in `el`. Layer groups live as long as the controller, so state set before attaching is kept. */
   attach(el: HTMLElement): void {
     if (this.map) this.detach();
-    const map = L.map(el, { center: [50, 10], zoom: 3 });
-    L.tileLayer(BASEMAP_URL, { attribution: ATTRIBUTION, maxZoom: 19 }).addTo(map);
+    const map = L.map(el, { center: [0, 0], zoom: 0, minZoom: MIN_ZOOM });
+    L.tileLayer(BASEMAP_URL, { attribution: ATTRIBUTION, minZoom: MIN_ZOOM, minNativeZoom: 0, maxZoom: 19 }).addTo(map);
     map.createPane(IMAGE_PANE).style.zIndex = '390'; // below the default overlay pane (400)
     map.createPane(VECTOR_PANE).style.zIndex = '450';
     for (const g of [this.overlayGroup, this.extentGroup, this.geometryGroup, this.drawnGroup]) g.addTo(map);
@@ -152,6 +170,9 @@ export class LeafletController implements MapApi, MapEngine {
     this.el = el;
     this.dataLayers.attach(map, el);
     this.markOverlay(this.overlayState);
+    this.fitWorld();
+    if (this.pendingFit) this.fitExtent(this.pendingFit.bbox, this.pendingFit.padLevels);
+    map.on('moveend zoomend', () => this.markView());
   }
 
   detach(): void {
@@ -159,6 +180,7 @@ export class LeafletController implements MapApi, MapEngine {
     if (!this.map) return;
     this.clearCoverage();
     this.dataLayers.detach();
+    this.el?.removeAttribute('data-view');
     this.map.remove();
     this.map = null;
     this.el = null;
@@ -360,18 +382,22 @@ export class LeafletController implements MapApi, MapEngine {
     if (geometry) geometryLayer(geometry).addTo(this.geometryGroup);
   }
 
-  showExtent(bbox: BBox | null): void {
+  showExtent(bbox: BBox | null, opts: ExtentOptions = {}): void {
     this.extentGroup.clearLayers();
-    if (bbox) {
-      const [w, s, e, n] = bbox;
-      L.rectangle(
-        [
-          [s, w],
-          [n, e],
-        ],
-        EXTENT_PATH,
-      ).addTo(this.extentGroup);
-    }
+    this.pendingFit = null;
+    if (!bbox) return;
+    const [w, s, e, n] = bbox;
+    L.rectangle(
+      [
+        [s, w],
+        [n, e],
+      ],
+      EXTENT_PATH,
+    ).addTo(this.extentGroup);
+    if (!opts.fit) return;
+    const padLevels = Math.max(0, opts.padLevels ?? 1);
+    if (this.map) this.fitExtent(bbox, padLevels);
+    else this.pendingFit = { bbox, padLevels };
   }
 
   showData(layer: DataLayer, opts: ShowDataOptions): void {
@@ -424,8 +450,70 @@ export class LeafletController implements MapApi, MapEngine {
     this.drawnGroup.clearLayers();
     this.geometryGroup.clearLayers();
     this.extentGroup.clearLayers();
+    this.pendingFit = null;
     this.clearOverlay();
     this.markOverlay(null);
+  }
+
+  /** Run `fn` with fractional zoom allowed (`zoomSnap` 0): Leaflet otherwise rounds a fitted zoom down to a whole level. */
+  private unsnapped<T>(map: L.Map, fn: () => T): T {
+    const snap = map.options.zoomSnap;
+    map.options.zoomSnap = 0;
+    try {
+      return fn();
+    } finally {
+      map.options.zoomSnap = snap;
+    }
+  }
+
+  /**
+   * The (fractional) zoom at which `bounds` just fits the map. `map.getBoundsZoom` is not used: it rounds to `zoomSnap`
+   * levels (always whole ones without 3D transforms), which would leave a short map showing several worlds.
+   */
+  private boundsZoom(map: L.Map, bounds: L.LatLngBounds): number {
+    const size = map.getSize();
+    const nw = map.project(bounds.getNorthWest(), 0);
+    const se = map.project(bounds.getSouthEast(), 0);
+    const scale = Math.min(size.x / Math.abs(se.x - nw.x), size.y / Math.abs(se.y - nw.y));
+    // 0.01 of a level (<1 %) less: Leaflet rounds the map's pixel origin, which would otherwise cut an exact fit by a pixel
+    return Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), Math.log2(scale) - 0.01));
+  }
+
+  /** Initial view: the whole world ({@link WORLD_BBOX}) fitted to the map size (fractional zoom: a short map zooms out below 0). */
+  private fitWorld(): void {
+    const map = this.map;
+    if (!map) return;
+    const world = latLngBounds(WORLD_BBOX);
+    this.unsnapped(map, () => map.setView(world.getCenter(), this.boundsZoom(map, world), { animate: false }));
+    this.markView();
+  }
+
+  /**
+   * Zoom so `bbox` fills the map (at most zoom {@link EXTENT_FIT_MAX_ZOOM}), then out by `padLevels`, but never
+   * further out than the whole world. No animation: the view is final when this returns.
+   */
+  private fitExtent(bbox: BBox, padLevels: number): void {
+    const map = this.map;
+    if (!map) return;
+    this.unsnapped(map, () => {
+      const worldZoom = this.boundsZoom(map, latLngBounds(WORLD_BBOX));
+      const fitZoom = Math.min(this.boundsZoom(map, latLngBounds(bbox)), EXTENT_FIT_MAX_ZOOM);
+      const zoom = Math.max(fitZoom - padLevels, Math.min(worldZoom, fitZoom));
+      map.setView(latLngBounds(bbox).getCenter(), zoom, { animate: false });
+    });
+    this.markView();
+  }
+
+  /** Mirrors the visible lon/lat extent as `data-view="west,south,east,north"` on the map element (tests / automation). */
+  private markView(): void {
+    const map = this.map;
+    const el = this.el;
+    if (!map || !el) return;
+    const b = map.getBounds();
+    // rounded outwards (to 0.001°): float noise must not make an exactly fitted extent look just outside the view
+    const lo = (v: number) => Math.floor(v * 1e3) / 1e3;
+    const hi = (v: number) => Math.ceil(v * 1e3) / 1e3;
+    el.setAttribute('data-view', [lo(b.getWest()), lo(Math.max(-90, b.getSouth())), hi(b.getEast()), hi(Math.min(90, b.getNorth()))].join(','));
   }
 
   /** Mirrors the overlay state (`data-overlay`: loading | loaded | error) on the map element for tests/automation. */

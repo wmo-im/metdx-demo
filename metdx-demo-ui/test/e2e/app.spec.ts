@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, expectMapRendered, shotName, test } from './engine';
 
@@ -90,6 +90,61 @@ test('default (no ?mock): searches the catalogue for the default query through t
       u.includes('https://wmo-resource-catalogue.labs.wis2dev.io/collections/wis2-discovery-metadata/items?limit=10&offset=0&q=metdx-demo'),
     ),
   ).toBe(true);
+});
+
+/** The visible [west, south, east, north] the map mirrors as `data-view` (both engines). */
+async function mapView(page: Page): Promise<number[]> {
+  const v = await page.getByTestId('map').getAttribute('data-view');
+  return v ? v.split(',').map(Number) : [];
+}
+
+test('the map starts on the whole world; opening a record shows its footprint with context around it', async ({ page }) => {
+  await page.goto('/?mock=1');
+  const world = [-180, -85, 180, 85];
+  const contains = (v: number[], b: number[]) => v.length === 4 && v[0] <= b[0] && v[1] <= b[1] && v[2] >= b[2] && v[3] >= b[3];
+  await expect.poll(async () => contains(await mapView(page), world), { message: 'initial view contains the world' }).toBe(true);
+
+  await page.getByLabel('Search datasets').fill('Deterministic');
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  await page.getByTestId('result-card').filter({ hasText: RECORD_TITLE }).click();
+  await expect(page.getByRole('heading', { name: RECORD_TITLE })).toBeVisible();
+  // the record's EDR collection covers the world ([-180,-90,180,90] in the mock): the view shows all of it, and some more
+  const footprint = [-180, -90, 180, 90];
+  await expect
+    .poll(async () => {
+      const v = await mapView(page);
+      return contains(v, [-180, -85, 180, 85]) && v[2] - v[0] >= footprint[2] - footprint[0];
+    })
+    .toBe(true);
+});
+
+test('opening a record with a regional footprint zooms to it, with context around it', async ({ page }) => {
+  const europe = [-10, 35, 30, 60];
+  const collection = JSON.parse(readFileSync(join(process.cwd(), 'test', 'fixtures', 'collections', 'operational-data.json'), 'utf8'));
+  collection.extent.spatial.bbox = [europe];
+  await page.route('**/api/proxy**', (route) => {
+    const upstream = new URL(route.request().url()).searchParams.get('url') ?? '';
+    if (/\/collections\/operational-data(\?|$)/.test(upstream)) {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(collection) });
+    }
+    return route.fulfill({ status: 502, contentType: 'application/json', body: '{}' });
+  });
+  await page.goto('/?records=local');
+  const contains = (v: number[], b: number[]) => v.length === 4 && v[0] <= b[0] && v[1] <= b[1] && v[2] >= b[2] && v[3] >= b[3];
+  await expect.poll(async () => contains(await mapView(page), [-180, -85, 180, 85])).toBe(true); // starts on the world
+  const world = await mapView(page);
+
+  await page.getByTestId('result-card').filter({ hasText: RECORD_TITLE }).click();
+  await expect(page.getByRole('heading', { name: RECORD_TITLE })).toBeVisible();
+  await expect
+    .poll(async () => {
+      const v = await mapView(page);
+      return contains(v, europe) && v[2] - v[0] < world[2] - world[0];
+    }, { message: 'the view is narrower than the world and contains the footprint' })
+    .toBe(true);
+  const v = await mapView(page);
+  expect(v[2] - v[0]).toBeGreaterThan(europe[2] - europe[0]); // context around the footprint
+  expect(v[3] - v[1]).toBeGreaterThan(europe[3] - europe[1]);
 });
 
 test('search -> record -> EDR -> draw point -> Fetch shows JSON and chart', async ({ page, engine }) => {

@@ -46,7 +46,7 @@ export default function RecordPage() {
   }, [id]);
 
   useEffect(() => {
-    if (services?.extent) mapRef.current.showExtent(services.extent);
+    if (services?.extent) mapRef.current.showExtent(services.extent, { fit: true, padLevels: 1 });
   }, [services]);
 
   if (loading) {

@@ -234,6 +234,7 @@ class FakeEngine implements MapEngine {
   readonly capabilities = {};
   el: HTMLElement | null = null;
   calls: string[] = [];
+  extents: unknown[] = [];
   rejectDraw: ((e: unknown) => void) | null = null;
   readonly api: MapApi;
   constructor(readonly name: string) {
@@ -243,7 +244,7 @@ class FakeEngine implements MapEngine {
       setOverlay: rec('setOverlay'),
       clear: rec('clear'),
       showGeometry: (g) => void this.calls.push(`showGeometry:${g ? g.type : 'null'}`),
-      showExtent: rec('showExtent'),
+      showExtent: (_b, o) => void (this.calls.push('showExtent'), this.extents.push(o)),
       showData: rec('showData'),
       clearData: rec('clearData'),
       onDataSelect: () => () => {},
@@ -318,6 +319,23 @@ describe('EngineHost', () => {
     expect(engines).toHaveLength(2);
     expect(engines[1].calls).toEqual(expect.arrayContaining(['showGeometry:Point', 'setOverlay']));
     expect(div.getAttribute('data-fake')).toBe('leaflet');
+  });
+
+  it('remembers the extent with its fit options while loading and replays both on a switch', async () => {
+    const { host, engines } = make('ol');
+    host.attach(document.createElement('div'));
+    host.showExtent([0, 0, 10, 10], { fit: true, padLevels: 1 }); // before the engine is loaded
+    await ready();
+    expect(engines[0].extents).toEqual([{ fit: true, padLevels: 1 }]);
+    host.showExtent([0, 0, 20, 20]); // a later call without options replaces them (no fit on replay)
+    host.switchTo('leaflet');
+    await ready();
+    expect(engines[1].extents).toEqual([undefined]);
+    host.showExtent([0, 0, 10, 10], { fit: true });
+    host.clear();
+    host.switchTo('ol');
+    await ready();
+    expect(engines[2].extents).toEqual([undefined]);
   });
 
   it('a failing load is reported, draws reject, and a later switch recovers', async () => {

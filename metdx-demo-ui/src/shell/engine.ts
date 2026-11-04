@@ -1,7 +1,7 @@
 import { getMapEngine, parseMapEngine } from '../lib/config';
 import type { BBox, DrawKind, Geometry } from '../lib/types';
 import type { DataLayer, DataSelectHandler, ShowDataOptions } from '../lib/covjsonTypes';
-import { DrawCancelledError, type MapApi, type MapCapabilities, type MapEngine, type MapEngineName } from './mapApi';
+import { DrawCancelledError, type ExtentOptions, type MapApi, type MapCapabilities, type MapEngine, type MapEngineName } from './mapApi';
 
 /**
  * Engine selection and loading. Each engine is a dynamic import, so a build only downloads the engine in use.
@@ -84,6 +84,7 @@ export class EngineHost implements MapApi {
   // Remembered state (replayed on a (re)attached engine).
   private geometry: Geometry | null = null;
   private extent: BBox | null = null;
+  private extentOpts: ExtentOptions | undefined;
   private overlay: {
     img: string;
     bbox: BBox;
@@ -182,7 +183,7 @@ export class EngineHost implements MapApi {
     engine.attach(this.el);
     const api = engine.api;
     if (!this.unsubSelect) this.unsubSelect = api.onDataSelect((i, ll) => this.selectHandlers.forEach((cb) => cb(i, ll)));
-    api.showExtent(this.extent);
+    api.showExtent(this.extent, this.extentOpts);
     api.showGeometry(this.geometry);
     if (this.overlay) api.setOverlay(this.overlay.img, this.overlay.bbox, this.overlay.opts);
     if (this.data) api.showData(this.data.layer, this.data.opts);
@@ -233,6 +234,7 @@ export class EngineHost implements MapApi {
   clear(): void {
     this.geometry = null;
     this.extent = null;
+    this.extentOpts = undefined;
     this.overlay = null;
     this.rejectPending(new DrawCancelledError());
     this.engine?.api.clear();
@@ -243,9 +245,10 @@ export class EngineHost implements MapApi {
     this.engine?.api.showGeometry(geometry);
   }
 
-  showExtent(bbox: BBox | null): void {
+  showExtent(bbox: BBox | null, opts?: ExtentOptions): void {
     this.extent = bbox;
-    this.engine?.api.showExtent(bbox);
+    this.extentOpts = opts;
+    this.engine?.api.showExtent(bbox, opts);
   }
 
   showData(layer: DataLayer, opts: ShowDataOptions): void {

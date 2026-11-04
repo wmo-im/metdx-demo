@@ -143,6 +143,22 @@ async function stopProbe(page: Page) {
 
 const findDataPixel = (page: Page) => findPixel(page, ENGINE);
 
+/** Wait until the visible extent (`data-view`) has not changed for 500 ms (animations finished). */
+async function settleView(page: Page) {
+  const map = page.getByTestId('map');
+  let last = await map.getAttribute('data-view');
+  let since = Date.now();
+  const deadline = Date.now() + 5000;
+  while (Date.now() - since < 500 && Date.now() < deadline) {
+    await page.waitForTimeout(100);
+    const now = await map.getAttribute('data-view');
+    if (now !== last) {
+      last = now;
+      since = Date.now();
+    }
+  }
+}
+
 /**
  * Click a drawn point and wait for the readout. OpenLayers reports `singleclick` 250 ms after the click (to tell it
  * from a double-click), so clicks must be spaced further apart than that. With a tainted canvas (basemap loaded)
@@ -150,6 +166,9 @@ const findDataPixel = (page: Page) => findPixel(page, ENGINE);
  */
 async function clickDataPoint(page: Page) {
   const sel = page.getByTestId('edr-selected');
+  // New data zooms the map to its extent (animated); a click during that animation cancels it and the data may be
+  // nowhere near the centre of the half-way view, so let the view settle first.
+  await settleView(page);
   const found = await findDataPixel(page).catch(() => null);
   if (found) {
     await page.mouse.click(found.x, found.y);
