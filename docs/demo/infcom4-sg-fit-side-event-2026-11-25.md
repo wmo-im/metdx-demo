@@ -5,7 +5,7 @@
     - [labs.wis2dev.io](https://labs.wis2dev.io) Global Discovery Catalogue [https://wmo-resource-catalogue.labs.wis2dev.io/collections/wis2-discovery-metadata/](https://wmo-resource-catalogue.labs.wis2dev.io/collections/wis2-discovery-metadata/)  
     - Use “metdx-demo” keyword to make our demo metadata records easy to find  
 2. Clarify terminology for “dataset”: in WIS2 context it’s a whole basket of resources - not an individual data file  
-3. Search [labs.wis2dev.io](https://labs.wis2dev.io) for a dataset - keyword “meted-demo”: ++urn:wmo:md:int-ecmwf:ecmwf-opendata-ifs-0p1-oper++ [note: watch for auto-correct shenanigans if you type “metdx-demo”]  
+3. Search [labs.wis2dev.io](https://labs.wis2dev.io) for a dataset - keyword “metdx-demo”: ++urn:wmo:md:int-ecmwf:ecmwf-opendata-ifs-0p1-oper++ [note: watch for auto-correct shenanigans if you type “metdx-demo”]  
 4. Talk about the “metadata driven workflow” (refer back to “Four mechanisms, one workflow” in the slides)   
 5. Show the links in the HTML page  
 6. Show the links in JSON; very brief overview of a links object, highlight “rel”:”collection” as being the machine-readable instruction that says “this is a link to an interactive data resource” (e.g., an OGC or STAC API)  
