@@ -387,10 +387,12 @@ describe('leaflet-coverage renderer option', () => {
   const fills = () => [...document.querySelectorAll('.leaflet-overlay-pane path')].map((p) => p.getAttribute('fill') ?? '');
 
   beforeEach(() => {
+    vi.stubEnv('VITE_ENABLE_LEAFLET', '1'); // Leaflet is off unless enabled at build time
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null); // jsdom has no 2D canvas; the built-in layer then draws nothing
   });
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     sessionStorage.removeItem(ENGINE_STORAGE_KEY);
   });
 
@@ -470,10 +472,12 @@ describe('switching the map engine drops the result', () => {
   }
 
   beforeEach(() => {
+    vi.stubEnv('VITE_ENABLE_LEAFLET', '1'); // Leaflet is off unless enabled at build time
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
   });
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     sessionStorage.removeItem(ENGINE_STORAGE_KEY);
   });
 

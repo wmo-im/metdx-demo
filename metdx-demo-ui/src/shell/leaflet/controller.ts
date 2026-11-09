@@ -162,6 +162,7 @@ export class LeafletController implements MapApi, MapEngine {
   attach(el: HTMLElement): void {
     if (this.map) this.detach();
     const map = L.map(el, { center: [0, 0], zoom: 0, minZoom: MIN_ZOOM });
+    map.attributionControl.setPrefix(false); // no "🇺🇦 Leaflet" prefix; the basemap attribution stays
     L.tileLayer(BASEMAP_URL, { attribution: ATTRIBUTION, minZoom: MIN_ZOOM, minNativeZoom: 0, maxZoom: 19 }).addTo(map);
     map.createPane(IMAGE_PANE).style.zIndex = '390'; // below the default overlay pane (400)
     map.createPane(VECTOR_PANE).style.zIndex = '450';

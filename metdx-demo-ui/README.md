@@ -65,7 +65,8 @@ Playwright runs against a production build served by `vite preview`, in mock mod
 
 ```sh
 npx playwright install chromium   # once
-npm run e2e
+npm run e2e           # mock-ol project against the default build (OpenLayers only)
+npm run e2e:leaflet   # both engines against a separate Leaflet-enabled build (dist-leaflet, preview port 4174)
 ```
 
 ## Docker
@@ -119,6 +120,7 @@ Build-time (Vite) settings, passed as Docker build args or env vars for `npm run
 | `VITE_BASEMAP_URL` | `https://tile.openstreetmap.org/{z}/{x}/{y}.png` | XYZ tile template for the basemap |
 | `VITE_BASEMAP_ATTRIBUTION` | OpenStreetMap contributors | Attribution HTML shown on the map |
 | `VITE_MOCK` | unset | `1` forces mock mode |
+| `VITE_ENABLE_LEAFLET` | unset | `1` makes the Leaflet engine available (see below); off: OpenLayers only |
 | `VITE_BASE` | `/` | Public base path the app is served under (assets and `config.json` are resolved against it) |
 | `VITE_ROUTER` | unset | `hash`: use hash routing (`#/record/...`) so reloads and deep links work on static hosts |
 
@@ -126,6 +128,20 @@ Build-time (Vite) settings, passed as Docker build args or env vars for `npm run
 docker build --build-arg VITE_BASEMAP_URL='https://tiles.example.com/{z}/{x}/{y}.png' \
   --build-arg VITE_BASEMAP_ATTRIBUTION='&copy; Example' -t metdx-demo-ui .
 ```
+
+### Map engine
+
+OpenLayers is the only map engine of a normal build. The Leaflet engine (`src/shell/leaflet/`) stays in the repository
+but is switched off at build time: `?map=`, the `mapEngine` config entry and the stored choice are ignored, the app-bar
+"Map engine" toggle is hidden, and Vite emits no Leaflet / Geoman / leaflet-coverage chunk. To compare the engines
+locally, build or serve with the switch on:
+
+```sh
+VITE_ENABLE_LEAFLET=1 npm run dev
+VITE_ENABLE_LEAFLET=1 npm run build   # then `npm run preview`
+```
+
+The toggle, `?map=ol|leaflet`, the `mapEngine` config entry (`ol` by default) and the session choice then work as before.
 
 **Basemap and the OpenStreetMap tile usage policy.** The default basemap uses the public OSM tile servers, which
 are for light use only (see <https://operations.osmfoundation.org/policies/tiles/>): no heavy use, no bulk

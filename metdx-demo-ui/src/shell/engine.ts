@@ -9,6 +9,13 @@ import { DrawCancelledError, type ExtentOptions, type MapApi, type MapCapabiliti
  * a map library statically.
  */
 
+/**
+ * Build-time switch: Leaflet is only available in builds made with `VITE_ENABLE_LEAFLET=1` (local comparison with
+ * OpenLayers). By default it is off: the engine is always OpenLayers (`?map=`, sessionStorage and the config file are
+ * ignored), the app-bar toggle is hidden and the Leaflet code is not part of the build (no chunk is emitted).
+ */
+export const leafletEnabled = (): boolean => import.meta.env.VITE_ENABLE_LEAFLET === '1';
+
 export const ENGINE_STORAGE_KEY = 'metdx.mapEngine';
 
 export const ENGINE_LABELS: Record<MapEngineName, string> = {
@@ -24,6 +31,7 @@ export async function loadEngine(name: MapEngineName): Promise<MapEngine> {
       return new MapController();
     }
     case 'leaflet': {
+      if (!leafletEnabled()) throw new Error('Leaflet is disabled in this build (VITE_ENABLE_LEAFLET=1 enables it)');
       const { LeafletController } = await import('./leaflet/controller');
       return new LeafletController();
     }
@@ -38,8 +46,12 @@ function safeStorage(): Storage | null {
   }
 }
 
-/** Engine at startup: `?map=` of the page URL, else the app-bar choice kept in sessionStorage, else the config. */
+/**
+ * Engine at startup: `?map=` of the page URL, else the app-bar choice kept in sessionStorage, else the config.
+ * Always OpenLayers unless Leaflet is enabled at build time ({@link leafletEnabled}).
+ */
 export function resolveEngineName(search?: string): MapEngineName {
+  if (!leafletEnabled()) return 'ol';
   try {
     const q = search ?? (typeof window === 'undefined' ? '' : window.location.search);
     const fromUrl = parseMapEngine(new URLSearchParams(q).get('map'));

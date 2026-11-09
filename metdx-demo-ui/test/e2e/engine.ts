@@ -8,6 +8,9 @@ export type EngineName = 'ol' | 'leaflet';
 
 export const ENGINE_STORAGE_KEY = 'metdx.mapEngine';
 
+/** `npm run e2e:leaflet`: the app under test was built with VITE_ENABLE_LEAFLET=1 (the default build is OpenLayers only). */
+export const LEAFLET_BUILD = process.env.E2E_LEAFLET === '1';
+
 export const test = base.extend<{ engine: EngineName }>({
   engine: ['ol', { option: true }],
   page: async ({ page, engine }, use) => {

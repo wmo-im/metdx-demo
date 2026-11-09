@@ -8,7 +8,7 @@ import { loadConfig, resetConfig, setRecordsSource } from '../lib/config';
 import { createMockFetch } from '../lib/mockFetch';
 import { MapController } from './mapController';
 import { MapProvider, MapView, useMap, useMapEngine } from './MapContext';
-import { ENGINE_STORAGE_KEY, EngineHost, resolveEngineName } from './engine';
+import { ENGINE_STORAGE_KEY, EngineHost, leafletEnabled, loadEngine, resolveEngineName } from './engine';
 import { DrawCancelledError, type MapApi, type MapEngine, type MapEngineName } from './mapApi';
 import { RequestBar, RequestBarProvider, useRegisterFetch, useRequestBar } from './RequestBar';
 import { cacheRecord, clearRecordCache, getCachedRecord, loadRecord, useRecord } from './recordCache';
@@ -270,14 +270,19 @@ describe('engine selection', () => {
     resetConfig();
   });
 
-  it('?map= beats sessionStorage, which beats the config', async () => {
+  it('is always OpenLayers when Leaflet is not enabled at build time (the default): ?map=, sessionStorage and config are ignored', async () => {
+    expect(leafletEnabled()).toBe(false);
     expect(resolveEngineName('')).toBe('ol');
     await loadConfig(async () => new Response(JSON.stringify({ mapEngine: 'leaflet' })), '');
-    expect(resolveEngineName('')).toBe('leaflet');
-    sessionStorage.setItem(ENGINE_STORAGE_KEY, 'ol');
     expect(resolveEngineName('')).toBe('ol');
-    expect(resolveEngineName('?map=leaflet')).toBe('leaflet');
+    sessionStorage.setItem(ENGINE_STORAGE_KEY, 'leaflet');
+    expect(resolveEngineName('')).toBe('ol');
+    expect(resolveEngineName('?map=leaflet')).toBe('ol');
     expect(resolveEngineName('?map=bogus')).toBe('ol');
+  });
+
+  it('refuses to load Leaflet when it is not enabled', async () => {
+    await expect(loadEngine('leaflet')).rejects.toThrow(/Leaflet is disabled/);
   });
 });
 
@@ -369,6 +374,7 @@ describe('EngineHost', () => {
   });
 
   it('MapView remounts its element on a switch (useMapEngine drives it)', async () => {
+    vi.stubEnv('VITE_ENABLE_LEAFLET', '1'); // lets the real Leaflet chunk load
     const spy = vi.spyOn(Storage.prototype, 'getItem').mockReturnValue('ol');
     let engineApi: ReturnType<typeof useMapEngine> = null;
     function Probe() {
@@ -391,9 +397,10 @@ describe('EngineHost', () => {
     const second = container.querySelector('[data-testid="map"]');
     expect(second).not.toBe(first);
     expect(second?.getAttribute('data-engine')).toBe('leaflet');
-    await waitFor(() => expect(second?.childElementCount).toBeGreaterThan(0)); // the real Leaflet map mounted (lazy chunk)
+    await waitFor(() => expect(second?.childElementCount).toBeGreaterThan(0), { timeout: 10_000 }); // the real Leaflet map mounted (lazy chunk)
+    vi.unstubAllEnvs();
     sessionStorage.clear();
-  });
+  }, 20_000);
 });
 
 describe('record cache', () => {

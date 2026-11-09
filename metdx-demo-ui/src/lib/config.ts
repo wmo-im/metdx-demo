@@ -19,6 +19,7 @@
  *            browser (static hosting such as GitHub Pages; needs CORS upstream).
  * - `mapEngine`: "ol" (default, OpenLayers) or "leaflet". Overridable with `?map=ol|leaflet`; the app-bar
  *                toggle (kept in sessionStorage) wins over the config file.
+ *                Only in builds with `VITE_ENABLE_LEAFLET=1`; otherwise the engine is always OpenLayers and this is ignored.
  *
  * EDR and Maps calls are independent of this setting (live unless mock mode).
  */

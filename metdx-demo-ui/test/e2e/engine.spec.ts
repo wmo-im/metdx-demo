@@ -1,10 +1,13 @@
-// Map-engine specific flows (mock project, run once per engine): the lazy-load contract (a build only downloads the
+// Map-engine specific flows (mock project).
+// Default build (`npm run e2e`): OpenLayers is the only engine: no app-bar toggle, `?map=leaflet` and a stored choice are
+// ignored, and no Leaflet code is ever requested.
+// Leaflet-enabled build (`npm run e2e:leaflet`, run once per engine): the lazy-load contract (a build only downloads the
 // engine in use), switching the engine in the app bar (also in the middle of a draw), and, once, side-by-side
 // screenshots of both engines for the same scenarios (test-results/screens/engine-*.png).
 import type { Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test, type EngineName } from './engine';
+import { expect, LEAFLET_BUILD, test, type EngineName } from './engine';
 
 const SCREENS = process.env.SCREENSHOT_DIR ?? join(process.cwd(), 'test-results', 'screens');
 const RECORD_TITLE = 'ECMWF IFS Global Deterministic Forecast (Destination Earth)';
@@ -59,7 +62,38 @@ function collectScripts(page: Page) {
   return async () => Promise.all(scripts.map(async (s) => ({ url: s.url, text: await s.text })));
 }
 
+test.describe('default build: OpenLayers only', () => {
+  test.skip(LEAFLET_BUILD, 'the build under test has Leaflet enabled');
+
+  test('?map=leaflet, a stored choice and the toggle are gone; no Leaflet code is requested', async ({ page }) => {
+    const scripts = collectScripts(page);
+    const requested: string[] = [];
+    page.on('request', (req) => requested.push(req.url()));
+    await page.addInitScript(() => sessionStorage.setItem('metdx.mapEngine', 'leaflet'));
+    await page.goto('/?mock=1&map=leaflet');
+    await expect(page.getByTestId('map')).toHaveAttribute('data-engine', 'ol');
+    await expect(page.getByTestId('map').locator('.ol-viewport').first()).toBeAttached();
+    await expect(page.getByRole('group', { name: 'Map engine' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Leaflet' })).toHaveCount(0);
+
+    const loaded = await scripts();
+    expect(loaded.some((s) => s.text.includes('ol-viewport'))).toBe(true);
+    expect(loaded.filter((s) => /leaflet-pane|geoman/.test(s.text)).map((s) => s.url), 'Leaflet must not be requested').toEqual([]);
+    expect(requested.filter((u) => /leaflet|geoman/i.test(new URL(u).pathname))).toEqual([]);
+  });
+
+  test('the app bar has a "Code on GitHub" link', async ({ page }) => {
+    await page.goto('/?mock=1');
+    const link = page.getByRole('link', { name: 'Code on GitHub' });
+    await expect(link).toHaveAttribute('href', 'https://github.com/wmo-im/metdx-demo');
+    await expect(link).toHaveAttribute('target', '_blank');
+    await expect(link).toHaveAttribute('rel', /noopener/);
+  });
+});
+
 test.describe('engine selection', () => {
+  test.skip(!LEAFLET_BUILD, 'needs a Leaflet-enabled build (npm run e2e:leaflet)');
+
   test('?map= loads only the chosen engine; the other one only arrives with the toggle', async ({ page, engine }) => {
     const other = OTHER[engine];
     const scripts = collectScripts(page);
@@ -189,6 +223,7 @@ const SCENARIOS: Scenario[] = [
 ];
 
 test.describe('engines side by side', () => {
+  test.skip(!LEAFLET_BUILD, 'needs a Leaflet-enabled build (npm run e2e:leaflet)');
   test.skip(({ engine }) => engine !== 'ol', 'one run covers both engines');
 
   for (const scenario of SCENARIOS) {

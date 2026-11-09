@@ -1,9 +1,10 @@
 import { AppBar, Box, Chip, IconButton, ToggleButton, ToggleButtonGroup, Toolbar, Tooltip, Typography } from '@mui/material';
 import PublicIcon from '@mui/icons-material/Public';
 import HomeIcon from '@mui/icons-material/Home';
+import GitHubIcon from '@mui/icons-material/GitHub';
 import { Link as RouterLink, Outlet } from 'react-router-dom';
 import { MapView, useMapEngine } from './MapContext';
-import { ENGINE_LABELS } from './engine';
+import { ENGINE_LABELS, leafletEnabled } from './engine';
 import type { MapEngineName } from './mapApi';
 import { RequestBar, ResultDialog } from './RequestBar';
 import { isMockMode } from '../lib/mockFetch';
@@ -11,12 +12,14 @@ import { paths } from './routes';
 
 export const SIDEBAR_WIDTH = 400;
 
+export const GITHUB_URL = 'https://github.com/wmo-im/metdx-demo';
+
 const ENGINES: MapEngineName[] = ['ol', 'leaflet'];
 
 /** Map engine toggle of the app bar (hidden when the engine is fixed, e.g. injected in tests). */
 function EngineToggle() {
   const engine = useMapEngine();
-  if (!engine) return null;
+  if (!leafletEnabled() || !engine) return null;
   return (
     <ToggleButtonGroup
       size="small"
@@ -50,6 +53,18 @@ export function Layout() {
           </Typography>
           <EngineToggle />
           {isMockMode() && <Chip size="small" color="secondary" label="mock data" />}
+          <Tooltip title="Code on GitHub">
+            <IconButton
+              color="inherit"
+              component="a"
+              href={GITHUB_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Code on GitHub"
+            >
+              <GitHubIcon />
+            </IconButton>
+          </Tooltip>
           <Tooltip title="Catalogue">
             <IconButton color="inherit" component={RouterLink} to={paths.catalogue()} aria-label="Catalogue">
               <HomeIcon />
