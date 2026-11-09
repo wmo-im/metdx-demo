@@ -341,9 +341,4 @@ chunk      init_time       lead_h  url                                          
 - Leave the advanced OAuth settings empty; the ECMWF MCP server doesn't use them  
 - This MCP server doesn’t have access to the IFS 0.1 degree operational forecast model data  
 - Ideally include a skill that requests data via OGC-API EDR  
-  
-  
-## METDX-DEMO testbed: powered by …  
-==TODO … @tomkralidis==  
-- Add a slide (@Tom) on software tools, components, etc. used in the demo; where they can be found etc.   
-  
+
