@@ -188,6 +188,26 @@
       "type": "text/html",
       "href": "https://destination-earth.eu",
       "title": "Destination Earth initiative"
+    },
+    {
+      "rel": "collection",
+      "type": "application/json",
+      "href": "https://6a6d74.github.io/ecmwf-stac/stac/collection.json",
+      "title": "STAC catalog: root Collection (IFS 0.1\u00b0 oper)",
+      "profile": "https://schemas.stacspec.org/v1.0.0/collection-spec/json-schema/collection.json"
+    },
+    {
+      "rel": "related",
+      "type": "text/html",
+      "href": "https://6a6d74.github.io/ecmwf-stac/browser/",
+      "title": "STAC Browser for this catalog"
+    },
+    {
+      "rel": "service",
+      "type": "application/json",
+      "href": "https://mcp.ecmwf.int",
+      "profile": "https://modelcontextprotocol.io/specification/2025-11-25",
+      "title": "ECMWF MCP server for AI agents (charts, catalogue discovery)"
     }
   ]
 }
