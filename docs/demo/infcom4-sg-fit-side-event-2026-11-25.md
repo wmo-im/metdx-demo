@@ -1,17 +1,20 @@
 # INFCOM-4 SG-FIT/LD demo  
   
 ## Step 1: Find the dataset  
+![slide-1-step-1.png](images/slide-1-step-1.png)  
 1. Setup:   
 - [labs.wis2dev.io](https://labs.wis2dev.io) Global Discovery Catalogue [https://wmo-resource-catalogue.labs.wis2dev.io/collections/wis2-discovery-metadata/](https://wmo-resource-catalogue.labs.wis2dev.io/collections/wis2-discovery-metadata/)  
 - Use “metdx-demo” keyword to make our demo metadata records easy to find  
 2. Clarify terminology for “dataset”: in WIS2 context it’s a whole basket of resources - not an individual data file  
 3. Search [labs.wis2dev.io](https://labs.wis2dev.io) for a dataset - keyword “metdx-demo”: ++urn:wmo:md:int-ecmwf:ecmwf-opendata-ifs-0p1-oper++ [note: watch for auto-correct shenanigans if you type “metdx-demo”]  
-4. Talk about the “metadata driven workflow” (refer back to “Four mechanisms, one workflow” in the slides)   
-5. Show the links in the HTML page  
-6. Show the links in JSON; very brief overview of a links object, highlight “rel”:”collection” as being the machine-readable instruction that says “this is a link to an interactive data resource” (e.g., an OGC or STAC API)  
-7. We’ll come back to these links in the rest of the demo …  
+4. _(optional)_ Load the WCMP2 record into the WCMP2 editor at https://6a6d74.github.io/wcmp2-editor/ to show the record in a more human readable form - upload the record from URL https://wmo-resource-catalogue.labs.wis2dev.io/collections/wis2-discovery-metadata/items/urn:wmo:md:int-ecmwf:ecmwf-opendata-ifs-0p1-oper?f=json  
+5. Talk about the “metadata driven workflow” (refer back to “Four mechanisms, one workflow” in the slides)   
+6. Show the links in the HTML page  
+7. Show the links in JSON; very brief overview of a links object, highlight “rel”:”collection” as being the machine-readable instruction that says “this is a link to an interactive data resource” (e.g., an OGC or STAC API)  
+8. We’ll come back to these links in the rest of the demo …  
   
 ## Step 2: The data is a pile of GRIB files  
+![slide-2-step-2.png](images/slide-2-step-2.png)  
 1. Example dataset: ++urn:wmo:md:int-ecmwf:ecmwf-opendata-ifs-0p1-oper++ … text/html link to “ECMWF Open Data portal (the GRIB2 files)” [https://data.ecmwf.int/forecasts/](https://data.ecmwf.int/forecasts/)   
 2. Show the links in the WCMWP2 record: [Web Accessible Folder](https://data.ecmwf.int/forecasts/)   
 3. Web Accessible Folder (WAF) user interface; navigate the directory path  
@@ -74,6 +77,7 @@ python grib_plot.py file.grib2 plot.png --param t --level 1000
 ![t.png](images/07B26049-44BF-4ADD-ACE7-1FDC58C6421A.png)  
   
 ## Step 3: Which file do I actually need?  
+![slide-3-step-3.png](images/slide-3-step-3.png)  
 1. Example dataset: ++urn:wmo:md:int-ecmwf:ecmwf-opendata-ifs-0p1-oper++   
 2. opendata/20261104/06z/ifs/0p1/oper/ includes “index” files that describe what is in each GRIB2 file - so you don’t have to download 380MB per file to figure that out  
 3. JSON format - but non-standard  
@@ -122,6 +126,7 @@ Parameters (10):
 ```
   
 ## Step 4: Real-time: publish / subscribe  
+![slide-4-step-4.png](images/slide-4-step-4.png)  
 1. Example dataset: ++urn:wmo:md:int-ecmwf:ecmwf-opendata-ifs-0p1-oper++   
 2. Find the record in [wmo-resource-catalogue.labs.wis2dev.io](https://wmo-resource-catalogue.labs.wis2dev.io)   
 3. Click on the “Subscribe to data notifications” button - the subscription configuration is provided  
@@ -207,11 +212,9 @@ Example WIS2 Notification Message
 
 ![Pasted Graphic.png](images/939B1840-251D-416D-9473-D2F94FCDC8BC.png)  
 ![wis2downloader-demo-architecture.png](images/7951CF68-71DC-423B-839F-9AE6130B280F.png)  
-  
-## ~~Step 5:~~   
-[Not used - moved to Step (6a)]  
-  
-## Step 6: Standardise the index: STAC   
+    
+## Step 5: Standardise the index: STAC   
+![slide-5-step-5.png](images/slide-5-step-5.png)  
 1. This is where the recommendations from SG-FIT start - steps 1-4 are used WIS2 already  
 2. Show the links in the WCMWP2 record: HTML [browser](https://6a6d74.github.io/ecmwf-stac/browser/), JSON [catalog](https://6a6d74.github.io/ecmwf-stac/stac/collection.json) [note: we use the “profile” attribute in the link block to distinguish the STAC collection resource from other collection resources; for a STAC static catalog the spec is: [https://schemas.stacspec.org/v1.0.0/collection-spec/json-schema/collection.json](https://schemas.stacspec.org/v1.0.0/collection-spec/json-schema/collection.json)]  
 3. Browse the STAC catalog: HTML [browser](https://6a6d74.github.io/ecmwf-stac/browser/), JSON [catalog](https://6a6d74.github.io/ecmwf-stac/stac/collection.json)  
@@ -228,7 +231,8 @@ Example WIS2 Notification Message
 ![ecmwf-stac-architecture.png](images/D4483EE4-7C35-4A32-9A77-973B4BD2F205.png)  
 ![ecmwf-stac-architecture-workflow.png](images/979A5579-AF50-493A-9B80-8E81265B67CA.png)  
   
-## Step 6a: One message per file is a lot of messages   
+## Step 6: One message per file is a lot of messages   
+![slide-6-step-6.png](images/slide-6-step-6.png)  
 [nothing to show here - just a verbal comment]  
 [note: contrary to my earlier thinking there is one .index file for each .grib (purpose - provide metadata for the grib2 file *and* byte-offsets for individual GRIB fields)]  
 1. One WNM message per GRIB file is a lot of messages; [note: estimate is that for the topic we’re looking at it’s about 8000 messages a day (including duplicates from each of 6 Global Caches)]  
@@ -238,6 +242,7 @@ Example WIS2 Notification Message
 5. If  “early access” to data is needed while a model run is still in progress, could publish WNM for a STAC item pointing to an incomplete (but self-consistent) set of GRIBs, and republish the STAC item with “rel”:”update” and new “pubtime” when more data is available  
   
 ## Step 7: Work at the dataset level: virtual Zarr  
+![slide-7-step-7.png](images/slide-7-step-7.png)  
 1. Example dataset: ++urn:wmo:md:int-ecmwf:ecmwf-opendata-ifs-0p1-oper++  
 2. Show the link-block ("type": "application/vnd+zarr") pointing to the Zarr store  
 - The Zarr store is an Icechunk manifest containing indexes onto GRIB files published by ECMWF onto Microsoft Planetary Computer (Azure);   
@@ -293,6 +298,7 @@ chunk      init_time       lead_h  url                                          
 ![ecmwf-virtual-cube-architecture-workflow.png](images/C9876A37-EAFA-45A1-B155-77E19C365C2D.png)  
   
 ## Step 8: For the rest of us, a Web API  
+![slide-8-step-8.png](images/slide-8-step-8.png)  
 ==TODO==  
 * Show the links in the WCMP2 record; recap on the “metadata driven workflow” (ref. back to “Four mechanisms, one workflow” in the slides)  
 * use metdx-demo UI client to interact with data through OGC APIs   
@@ -300,6 +306,7 @@ chunk      init_time       lead_h  url                                          
 * @m-burgoyne suggests “User doesn’t need to know it’s GRIB, netCDF, Zarr or anything else”   
   
 ## And Beyond: integration with AI agents   
+![slide-9-beyond.png](images/slide-9-beyond.png)  
 [time permitting]  
 1. Example dataset: ++urn:wmo:md:int-ecmwf:ecmwf-opendata-ifs-0p1-oper++  
 2. Show the links in the WCMP2 metadata record   
@@ -335,9 +342,4 @@ chunk      init_time       lead_h  url                                          
 - Leave the advanced OAuth settings empty; the ECMWF MCP server doesn't use them  
 - This MCP server doesn’t have access to the IFS 0.1 degree operational forecast model data  
 - Ideally include a skill that requests data via OGC-API EDR  
-  
-  
-## METDX-DEMO testbed: powered by …  
-==TODO … @tomkralidis==  
-- Add a slide (@Tom) on software tools, components, etc. used in the demo; where they can be found etc.   
-  
+
