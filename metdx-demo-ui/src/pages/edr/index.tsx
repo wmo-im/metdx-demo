@@ -20,7 +20,7 @@ import GestureIcon from '@mui/icons-material/Gesture';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { COLLECTION_PARAM, DrawCancelledError, RecordLink, useMap, useMapEngine, useRegisterFetch, useRequestBar } from '../../shell';
-import { AbortedError, HttpError, ResponseTooLargeError, fetchJson, fetchWithJob } from '../../lib/http';
+import { AbortedError, HttpError, NoContentError, ResponseTooLargeError, fetchJson, fetchWithJob } from '../../lib/http';
 import {
   COMMON_LEVELS,
   DEFAULT_CORRIDOR_HEIGHT,
@@ -70,6 +70,9 @@ import { ResultPanel, type FetchedResult } from './ResultPanel';
 type Status = { severity: 'error' | 'info' | 'success' | 'warning'; text: string } | null;
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+const NO_TEMPORAL_HINT =
+  'This collection does not say which times it has; leaving the dates empty returns all available times.';
 
 /** Larger EDR responses are refused (the datetime range / area is probably far too big). */
 const MAX_RESPONSE_BYTES = 60 * 1024 * 1024;
@@ -224,11 +227,11 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
   const effectiveInstance = useInstance && instanceId ? instanceId : null;
 
   // The extent the date fields default from (collection or instance), and whether the user has typed in them.
-  const [base, setBase] = useState<{ t: TemporalExtent; times: string[] | null; fallbackToday: boolean } | null>(null);
+  const [base, setBase] = useState<{ t: TemporalExtent; times: string[] | null } | null>(null);
   const datesEdited = useRef(false);
 
   // A new extent (collection load, instance switch) re-applies the defaults, dropping earlier edits.
-  const applyTemporal = useCallback((t: TemporalExtent, label: string, fallbackToday: boolean, data: unknown) => {
+  const applyTemporal = useCallback((t: TemporalExtent, label: string, data: unknown) => {
     // The offered instants (`values`), when listed in full; a capped (incomplete) list would hide valid times.
     const expanded = parseTemporalValues(data);
     const times = expanded && !expanded.capped ? expanded.times : null;
@@ -237,30 +240,26 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
     if (t.end) parts.push(`to ${t.end.slice(0, 16)}`);
     else if (t.start) parts.push('to now');
     let hint = parts.length ? `${label}: ${parts.join(' ')}` : '';
+    if (!parts.length && !times) hint = NO_TEMPORAL_HINT;
     if (times) {
       const steps = describeSteps(times);
       if (steps) hint += `${hint ? '. ' : ''}Steps: ${steps}`;
     }
     setDtHint(hint);
     datesEdited.current = false;
-    setBase({ t, times, fallbackToday });
+    setBase({ t, times });
   }, []);
 
   // Defaults per query type (a whole extent can be hundreds of MB): position = first step + 1 day (a time
   // series), everything else = the first step only. Changing the mode re-applies them unless the user edited the dates.
   useEffect(() => {
     if (!base || datesEdited.current) return;
-    const today = base.fallbackToday ? `${new Date().toISOString().slice(0, 10)}T00:00:00Z` : null;
-    const d = base.times ? defaultDatetimeFromTimes(mode, base.times) : defaultDatetime(mode, base.t, today);
-    if (d) {
-      setStartDate(d.startDate);
-      setStartTime(d.startTime);
-      setEndDate(d.endDate);
-      setEndTime(d.endTime);
-    } else {
-      setEndDate('');
-      setEndTime('');
-    }
+    // No temporal info at all (neither interval nor values): leave the fields empty, so no `datetime` is sent.
+    const d = base.times ? defaultDatetimeFromTimes(mode, base.times) : defaultDatetime(mode, base.t);
+    setStartDate(d?.startDate ?? '');
+    setStartTime(d?.startTime ?? '');
+    setEndDate(d?.endDate ?? '');
+    setEndTime(d?.endTime ?? '');
   }, [base, mode]);
 
   const editDate = (set: (v: string) => void) => (e: { target: { value: string } }) => {
@@ -318,7 +317,7 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
         const avail = availableModes(c.modes);
         setMode((m) => (avail.length && !avail.includes(m) ? avail[0] : m));
         map.showExtent(c.bbox);
-        applyTemporal(c.temporal, 'Available', true, data);
+        applyTemporal(c.temporal, 'Available', data);
       },
       (e) => live && setInfoError(errorMessage(e)),
     );
@@ -344,7 +343,7 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
     if (!effectiveInstance) {
       if (hadInstance.current) {
         hadInstance.current = false;
-        if (collectionTemporal) applyTemporal(collectionTemporal, 'Available', true, collectionData.current);
+        if (collectionTemporal) applyTemporal(collectionTemporal, 'Available', collectionData.current);
       }
       return;
     }
@@ -352,7 +351,7 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
     let live = true;
     setDtHint('Loading forecast range...');
     fetchJson(instanceUrl(collectionUrl, effectiveInstance)).then(
-      (data) => live && applyTemporal(parseTemporal(data), 'Valid range', false, data),
+      (data) => live && applyTemporal(parseTemporal(data), 'Valid range', data),
       (e) => live && setDtHint(`Could not load instance details: ${errorMessage(e)}`),
     );
     return () => {
@@ -529,6 +528,9 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
       if (!current()) return;
       if (e instanceof AbortedError) {
         setStatus({ severity: 'warning', text: 'Request cancelled' });
+      } else if (e instanceof NoContentError) {
+        // 204 / empty body: the request was fine, there is just nothing for it. Not an error dialog.
+        setStatus({ severity: 'info', text: e.message });
       } else {
         setResult({ kind: 'error', message: errorMessage(e, target) });
         setStatus({ severity: 'error', text: 'Request failed' });
@@ -804,7 +806,9 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
           </Typography>
         )}
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-          {mode === 'position'
+          {dtHint === NO_TEMPORAL_HINT
+            ? 'Type dates (YYYY-MM-DD) to query a specific time or range.'
+            : mode === 'position'
             ? 'Starts with the first available step and the following day. Edit the dates to query another range.'
             : 'Starts with a single time (the first available step). Set a later end to query a range.'}
           {times ? ' Only available times can be chosen.' : ''}

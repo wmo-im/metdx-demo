@@ -316,6 +316,20 @@ function numericAxis(a: Axis): number[] {
   return out;
 }
 
+/**
+ * A CoverageJSON time value as ISO 8601 UTC. Servers send zone-less values (`2026-10-30T04:00:00.000000000`,
+ * nanoseconds): those are UTC, so they get a `Z`, and a fraction longer than milliseconds (which `Date`
+ * does not take everywhere) is cut to milliseconds (dropped when zero). Zoned and non-datetime values stay as sent.
+ */
+export function normaliseTime(t: string): string {
+  const m = t.trim().match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?)(?:\.(\d+))?(Z|[+-]\d{2}(?::?\d{2})?)?$/i);
+  if (!m) return t;
+  const [, base, frac, zone] = m;
+  const secs = base.length === 16 ? `${base}:00` : base;
+  const ms = frac ? frac.slice(0, 3).padEnd(3, '0') : '000';
+  return `${secs}${ms === '000' ? '' : `.${ms}`}${zone ? (zone.toUpperCase() === 'Z' ? 'Z' : zone) : 'Z'}`;
+}
+
 /** Fill `out` with the values of one range for time step `ti` (and z level `zi`). */
 function extract(part: Part, p: { raw: unknown[]; dims: Dim[] }, grid: boolean, ti: number, zi: number, out: Float32Array): void {
   let base = 0;
@@ -420,7 +434,7 @@ export function parseCoverageJson(json: unknown, options: ParseOptions = {}): Co
   const first = covs[0];
   const separateT = first.axes.t?.values ?? [];
   const compositeHasT = kind === 'trajectory' && !!first.axes.c?.tuple?.includes('t');
-  const times: string[] = compositeHasT ? [] : separateT.map(String);
+  const times: string[] = compositeHasT ? [] : separateT.map((t) => normaliseTime(String(t)));
   const nTimes = Math.max(times.length, 1);
   const zAxis = first.axes.z;
   const levels = zAxis ? zAxis.values.map((v) => Number(v)) : [];

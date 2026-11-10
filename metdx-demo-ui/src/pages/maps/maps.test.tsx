@@ -122,6 +122,19 @@ describe('MapsPage', () => {
     await waitFor(() => expect(screen.getByTestId('maps-status')).toHaveTextContent(/Failed: HTTP 500/));
   });
 
+  it('an empty image response (204) shows a clear message, not an error', async () => {
+    const user = userEvent.setup({ delay: null });
+    const real = createMockFetch();
+    setup();
+    await waitFor(() => expect(urlBox().value).toContain('parameter-name=2t'));
+    setFetchImpl((input, init) =>
+      /[?&]bbox=/.test(unproxyUrl(input)) ? Promise.resolve(new Response(null, { status: 204 })) : real(input, init),
+    );
+    await user.click(screen.getByRole('button', { name: /fetch/i }));
+    await waitFor(() => expect(screen.getByTestId('maps-status')).toHaveTextContent(/No map for this request/));
+    expect(screen.getByTestId('maps-status')).not.toHaveTextContent(/Failed/);
+  });
+
   it('a map request that never answers can be cancelled', async () => {
     const user = userEvent.setup({ delay: null });
     setFetchImpl((input, init) =>

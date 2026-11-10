@@ -4,6 +4,7 @@ import {
   HttpError,
   JobFailedError,
   JobTimeoutError,
+  NoContentError,
   ResponseTooLargeError,
   TimeoutError,
   asRedirect,
@@ -448,5 +449,26 @@ describe('job polling', () => {
   it('plain JSON passes straight through', async () => {
     setFetchImpl(async () => json(RESULT));
     await expect(fetchWithJob(UP)).resolves.toEqual(RESULT);
+  });
+});
+
+describe('no content', () => {
+  it('204 -> NoContentError (not "not valid JSON"), also with a JSON content type', async () => {
+    setFetchImpl(async () => new Response(null, { status: 204, headers: { 'content-type': 'application/json' } }));
+    await expect(fetchJson(UP)).rejects.toBeInstanceOf(NoContentError);
+    await expect(fetchJson(UP)).rejects.toThrow(/^No data for this request \(the server returned no content\)\. Try other dates or another location\.$/);
+    await expect(fetchWithJob(UP)).rejects.toBeInstanceOf(NoContentError);
+  });
+  it('an empty 200 body is also NoContentError, for JSON and for images', async () => {
+    setFetchImpl(async () => new Response('', { status: 200, headers: { 'content-type': 'application/json' } }));
+    await expect(fetchJson(UP)).rejects.toMatchObject({ name: 'NoContentError', status: 200 });
+    setFetchImpl(async () => new Response(new Uint8Array(0), { status: 200, headers: { 'content-type': 'image/png' } }));
+    await expect(fetchBlob(UP)).rejects.toBeInstanceOf(NoContentError);
+  });
+  it('is not retried', async () => {
+    const f = vi.fn(async () => new Response(null, { status: 204 }));
+    setFetchImpl(f);
+    await expect(fetchJson(UP, { retries: 3 })).rejects.toBeInstanceOf(NoContentError);
+    expect(f).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,0 +1,101 @@
+{
+  "type": "Coverage",
+  "domain": {
+    "type": "Domain",
+    "domainType": "PointSeries",
+    "axes": {
+      "x": {
+        "values": [
+          -75.7
+        ]
+      },
+      "y": {
+        "values": [
+          45.4
+        ]
+      },
+      "t": {
+        "values": [
+          "2026-10-30T04:00:00.000000000",
+          "2026-10-30T05:00:00.000000000",
+          "2026-10-30T06:00:00.000000000",
+          "2026-10-30T07:00:00.000000000",
+          "2026-10-30T08:00:00.000000000",
+          "2026-10-30T09:00:00.000000000",
+          "2026-10-30T10:00:00.000000000",
+          "2026-10-30T11:00:00.000000000",
+          "2026-10-30T12:00:00.000000000",
+          "2026-10-30T13:00:00.000000000"
+        ]
+      }
+    },
+    "referencing": [
+      {
+        "coordinates": [
+          "x",
+          "y"
+        ],
+        "system": {
+          "type": "GeographicCRS",
+          "id": "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
+        }
+      },
+      {
+        "coordinates": [
+          "t"
+        ],
+        "system": {
+          "type": "TemporalRS",
+          "calendar": "Gregorian"
+        }
+      }
+    ]
+  },
+  "parameters": {
+    "AirTemp": {
+      "id": "AirTemp",
+      "type": "Parameter",
+      "name": "Air temperature",
+      "observedProperty": {
+        "id": "AirTemp",
+        "label": {
+          "en": "Air temperature"
+        }
+      },
+      "unit": {
+        "symbol": {
+          "value": "celsius",
+          "type": "http://www.opengis.net/def/uom/UCUM/"
+        }
+      }
+    }
+  },
+  "ranges": {
+    "AirTemp": {
+      "type": "NdArray",
+      "dataType": "float",
+      "axisNames": [
+        "t",
+        "y",
+        "x"
+      ],
+      "shape": [
+        10,
+        1,
+        1
+      ],
+      "values": [
+        13.899860382080078,
+        12.810962677001953,
+        11.754467010498047,
+        10.411945343017578,
+        9.667774200439453,
+        8.544527053833008,
+        8.084638595581055,
+        7.524139404296875,
+        7.119159698486328,
+        7.981113433837891
+      ]
+    }
+  }
+}

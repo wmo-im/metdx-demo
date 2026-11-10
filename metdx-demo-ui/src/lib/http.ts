@@ -67,6 +67,19 @@ function formatBytes(n: number): string {
   return n >= 1_048_576 ? `${(n / 1_048_576).toFixed(0)} MB` : `${Math.max(1, Math.round(n / 1024))} kB`;
 }
 
+/**
+ * The request worked but the server sent nothing back: HTTP 204 No Content, or a 2xx with an empty body
+ * (EDR answers a query outside the data's extent this way). Not a failure of the server or of the JSON.
+ */
+export class NoContentError extends Error {
+  readonly status: number;
+  constructor(status = 204) {
+    super('No data for this request (the server returned no content). Try other dates or another location.');
+    this.name = 'NoContentError';
+    this.status = status;
+  }
+}
+
 export class AbortedError extends Error {
   constructor() {
     super('Request aborted');
@@ -350,7 +363,7 @@ export type RawResult =
   | { kind: 'blob'; blob: Blob; contentType: string };
 
 /**
- * GET without following redirects. JSON/text bodies are parsed; a proxy 3xx
+ * GET without following redirects. A 204 or an empty body throws {@link NoContentError}. JSON/text bodies are parsed; a proxy 3xx
  * envelope is returned as `{kind: 'redirect'}`; everything else as a Blob.
  */
 export async function fetchRaw(url: string, opts: HttpOptions = {}): Promise<RawResult> {
@@ -359,7 +372,9 @@ export async function fetchRaw(url: string, opts: HttpOptions = {}): Promise<Raw
 
 async function readRaw(res: Response, signal: AbortSignal, maxBytes: number): Promise<RawResult> {
   const contentType = res.headers.get('content-type') ?? '';
+  if (res.status === 204) throw new NoContentError(204);
   const chunks = await readChunks(res, maxBytes, signal);
+  if (chunks.every((c) => c.byteLength === 0)) throw new NoContentError(res.status);
   if (/json|text\//i.test(contentType) || contentType === '') {
     const text = decodeUtf8(chunks);
     let data: unknown;

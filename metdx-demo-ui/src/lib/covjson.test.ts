@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { CovJsonError, parseCoverageJson, pointSeries } from './covjson';
+import { CovJsonError, normaliseTime, parseCoverageJson, pointSeries } from './covjson';
 import { MAX_GRID_CELLS, MAX_POINTS, TooLargeToDraw, isGridSpec, type GridSpec } from './covjsonTypes';
+import mscPosition from '../../test/fixtures/edr/msc-position.json';
 import livePosition from '../../test/fixtures/edr/live-position.json';
 import liveArea from '../../test/fixtures/edr/live-area.json';
 import liveAreaFrance from '../../test/fixtures/edr/live-area-france.json';
@@ -446,5 +447,29 @@ describe('longitudes across 0° and 180°', () => {
     expect(l.values('T', 0)[0]).toBe(0);
     const closed = Array.from({ length: 145 }, (_, i) => -180 + i * 2.5);
     expect(arr(grid(parseCoverageJson(stdGrid({}, { x: { values: closed } }, { shape: [2, 145], values: new Array(290).fill(1) }))).x)).toEqual(closed);
+  });
+});
+
+describe('times without a zone (MSC)', () => {
+  it('normaliseTime: no zone = UTC, nanoseconds cut to milliseconds, other values untouched', () => {
+    expect(normaliseTime('2026-10-30T04:00:00.000000000')).toBe('2026-10-30T04:00:00Z');
+    expect(normaliseTime('2026-10-30T04:00:00.123456789')).toBe('2026-10-30T04:00:00.123Z');
+    expect(normaliseTime('2026-10-30T04:00')).toBe('2026-10-30T04:00:00Z');
+    expect(normaliseTime('2026-10-30T04:00:00Z')).toBe('2026-10-30T04:00:00Z');
+    expect(normaliseTime('2026-10-30T04:00:00+02:00')).toBe('2026-10-30T04:00:00+02:00');
+    expect(normaliseTime('2026-10-30')).toBe('2026-10-30');
+    expect(normaliseTime('not a time')).toBe('not a time');
+  });
+  it('a PointSeries with zone-less nanosecond times parses to UTC ISO times and a chartable series', () => {
+    const l = parseCoverageJson(mscPosition);
+    expect(l.times).toHaveLength(10);
+    expect(l.times[0]).toBe('2026-10-30T04:00:00Z');
+    expect(l.times[9]).toBe('2026-10-30T13:00:00Z');
+    for (const t of l.times) expect(Date.parse(t) % 3_600_000).toBe(0); // valid, on the hour, as UTC
+    expect(Date.parse(l.times[1]) - Date.parse(l.times[0])).toBe(3_600_000);
+    const key = l.parameters[0].key;
+    const s = pointSeries(l, 0, key);
+    expect(s).toHaveLength(10);
+    expect(s[0]).toEqual({ time: '2026-10-30T04:00:00Z', value: expect.closeTo(13.89986, 4) });
   });
 });

@@ -17,7 +17,7 @@ import LayersClearIcon from '@mui/icons-material/LayersClear';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { DrawCancelledError, RecordLink, useMap, useRegisterFetch, useRequestBar } from '../../shell';
 import { COLLECTION_PARAM } from '../../shell/routes';
-import { AbortedError, HttpError, MAPS_HTTP, fetchBlob, fetchJson } from '../../lib/http';
+import { AbortedError, HttpError, MAPS_HTTP, NoContentError, fetchBlob, fetchJson } from '../../lib/http';
 import type { BBox } from '../../lib/types';
 import {
   DEFAULT_BBOX_TEXT,
@@ -278,6 +278,10 @@ export default function MapsPage() {
         if (!current()) return;
         if (e instanceof AbortedError) {
           setStatus({ severity: 'warning', text: 'Request cancelled' });
+          return;
+        }
+        if (e instanceof NoContentError) {
+          setStatus({ severity: 'info', text: 'No map for this request (the server returned no content). Try other dates or another area.' });
           return;
         }
         setStatus({ severity: 'error', text: `Failed: ${mapErrorMessage(e)}` });
