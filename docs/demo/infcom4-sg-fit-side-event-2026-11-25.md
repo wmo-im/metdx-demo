@@ -349,8 +349,29 @@ chunk      init_time       lead_h  url                                          
     - In the query builder only "POSITION" is available: this EDR endpoint supports only position queries (plus `instances`, its model runs). It's the same `data_queries` metadata you saw for ECMWF in point 5; open the "OGC EDR" `collection` link to compare.
     - Click "Draw position", then add a point on the map (e.g., Toronto), select "AirTemp (Air Temperature) \[celsius\]" from the parameter list, and click "Fetch" _(we leave the "Datetime" selector with default values to select the complete time-range)_
     - The Web UI zooms in on the selected point and shows the time-series chart in the left-hand panel _(use the time-slider to see the dot on the map change colour)_
-14. **==TODO==** _Add sections for other datasets, e.g., "Met Office Global Model forecast via OGC EDR (ICE demo, Met Office Labs)" << ==this service is currently timing out==_
-15. The point: the UI knows nothing about ECMWF or ECCC. Everything it does comes from each record's links and the collection metadata behind them (**metadata-driven**). That's why the same UI offered six query types for ECMWF and only `position` for Canada.
+14. What about a larger dataset? Head back to the catalogue search page and select the "ERA5 hourly reanalysis on single levels, served from cloud-optimised Zarr" dataset: a global dataset with data from 1940 to the present (about a week behind real time)
+    - _Behind this: ERA5 is stored as analysis-ready, cloud-optimised (ARCO) Zarr, organised for fast reads, so a decade at a single point comes back in seconds._
+    - A short explainer for the data pipeline:
+
+    **==TODO==** _Stack-diagram for the ERA5 pipeline (ERA5 → ARCO Zarr → Polytope EDR on DestinE → CoverageJSON): ask ECMWF (@awarde96) for a description like the Canadian VOF one. Probably one request covering both this and the point 6 diagram._
+
+15. **EDR:**
+    - Open the EDR query builder. This time the query types are "POSITION", "AREA" and "CUBE": this endpoint's `data_queries` offers three of the six you saw for the ECMWF forecast. Same UI, different metadata.
+    - For "POSITION" query, click "Draw position" then select a point on the map - e.g., Geneva
+    - Select a "Parameter" - e.g., "t2m (2 metre temperature) \[K\]"
+    - Select 10 years of data in the "Datetime" panel - e.g., 2016-01-01 00:00 to 2025-12-31 23:59
+    - Click "Fetch". Ten years of hourly data (about 87,600 values) comes back in around ten seconds, and you can see the annual temperature cycle
+16. **==TODO==** _Add sections for other datasets, e.g., "Met Office Global Model forecast via OGC EDR (ICE demo, Met Office Labs)" << ==this service is currently timing out==_
+17. Using Web APIs isn't just a future thing - in Europe, [EUMETNET](https://www.eumetnet.eu) has built on the foundations of WIS2 with [MeteoGate](https://meteogate.eu) to provide federated access to Web services from its Members.
+    - MeteoGate includes a Web application called [Data Explorer](https://explorer.meteogate.eu/workspace/defaultDataExplorerWorkspacePreset) _(based on [GeoWeb](https://opengeoweb.gitlab.io) - developed by KNMI, MetNo, and FMI)_ - open [Data Explorer](https://explorer.meteogate.eu/workspace/defaultDataExplorerWorkspacePreset) in a browser
+    - Data Explorer loads presets for common tooling - starting with a widget to search the WIS2 Catalogue
+    - Unselect the "MeteoGate only" button to see all the WIS2 catalogue records
+    - Filter by country, e.g. "Austria" (a handful of records), click on the information icon "i" to inspect a WIS2 discovery metadata record
+    - Most datasets in WIS2 aren't yet exposed through APIs - so let's jump to some that are: click "Data Explorer" on the top menu bar to load a new preset, select "Meteogate - Surface Observations" which will load map and data panels side-by-side
+    - Behind the scenes Data Explorer is talking to an OGC API EDR endpoint for the E-SOH system (EUMETNET Supplementary Observations Datahub, see documentation [here](https://github.com/EUMETNET/e-soh-documentation/wiki/1.-Get-started)) that publishes a rolling 24-hour cache of observations for observing stations operated by EUMETNET Members
+    - The map panel is showing "frog-spawn": one dot for each observing station from which data is available
+    - On the map, pick a station (e.g., Helsinki Kumpula) and the data panel loads the last 24 hours of data for each parameter the station reports
+18. The point: the UI knows nothing about ECMWF or ECCC. Everything it does comes from each record's links and the collection metadata behind them (**metadata-driven**). That's why the same UI offered six query types for the ECMWF forecast, three for ERA5 and only `position` for Canada. And MeteoGate's Data Explorer shows the same pattern at European scale: catalogue first, then standard APIs.
 
 The UI is a static web page (GitHub Pages): the browser calls the catalogue and the APIs directly. Direct links for the ECMWF 0.1° record:
 - [this record in the UI](https://wmo-im.github.io/metdx-demo/metdx-demo-ui/#/record/urn%3Awmo%3Amd%3Aint-ecmwf%3Aecmwf-opendata-ifs-0p1-oper)
