@@ -299,15 +299,52 @@ chunk      init_time       lead_h  url                                          
   
 ## Step 8: For the rest of us, a Web API  
 ![slide-8-step-8.png](images/slide-8-step-8.png)  
-==TODO==  
-* Show the links in the WCMP2 record; recap on the “metadata driven workflow” (ref. back to “Four mechanisms, one workflow” in the slides)  
-* use metdx-demo UI client to interact with data through OGC APIs   
-* Possible inclusion: GeoWeb end-points   
-* @m-burgoyne suggests “User doesn’t need to know it’s GRIB, netCDF, Zarr or anything else”   
-  
+1. **Recap the record's links:** one WCMP2 record, and its links say how to get the data: files (Steps 2–3), notifications (Step 4), a STAC catalogue (Step 5), a Zarr store (Step 7) and, here, **OGC APIs**: EDR for subsets, Maps for images. *"The user doesn't need to know it's GRIB, netCDF, Zarr or anything else."*
+2. Open the **metdx-demo Web UI**: https://wmo-im.github.io/metdx-demo/metdx-demo-ui/ ([source](https://github.com/wmo-im/metdx-demo/tree/main/metdx-demo-ui)). It searches the same Global Discovery Catalogue as Step 1, with **metdx-demo** already in the search box. Records matching the catalogue search are shown in the left-hand panel. You can see all the other catalogue records listed if you delete the text in the search box.
+3. Each record in the list shows whether it offers interactive access through `EDR` or `OGC Maps`. The Web UI works this out from the metadata alone: it follows the record's `collection` links and reads the collection metadata at the other end.
+4. Open the ECMWF 0.1° record "ECMWF physics-based deterministic forecast at 0.1°". The record page shows its OGC API collections. There's quite a lot of metadata shown for this record - so scroll down to see the "Data Access" section. You can see that the following EDR query types are supported: `position`, `radius`, `area`, `cube`, `trajectory` and `corridor`, plus `instances`: the individual model runs, so you can query a particular run rather than the latest. All of these are part of the standard OGC API – EDR specification, though an EDR endpoint doesn't have to support all of them.
+5. The `collection` resource is JSON metadata. Click on the "OGC EDR" (`collection`) link to load it (target: https://polytope-edr.lumi.apps.dte.destination-earth.eu/collections/operational-data?f=json). It's a standard-compliant JSON document meant for machines not humans. It contains all the metadata needed for the Web UI to build a meaningful query interface for a user - everything is driven by the metadata. As an example, search in the JSON for `data_queries` - this shows the query types that the EDR end-point supports.
+6. A short explainer for the data pipeline - from source to OGC API endpoint
+
+   **==TODO==** _Stack-diagram for the Polytope EDR pipeline (IFS → … → OGC API – EDR): ask ECMWF (@awarde96) for a description like the Canadian VOF one._
+
+7. **EDR:** open the EDR query builder:
+   - You'll see the available parameters - let's pick `2t` (2m temperature)
+   - The date/time range for data availability is also shown, with selectable options driven by metadata - keep "Start date" as default, and pick an "End date" two days into the future with "End time" at midday
+   - _(for simplicity, we'll skip over the "Use a specific instance" option - this allows the user to query data from a specific model run instance; default is the most recent)_
+8. Select query type "POSITION", then "Draw position" and pick a point on the map (e.g. Geneva)
+   - The Web UI builds the EDR query and displays it at the bottom of the page 
+   - Click "Open in browser" (↗) to open the query URL in a new tab - it's more JSON (CoverageJSON), again, designed for machines not humans
+   - Back in the Web UI click "Fetch" to illustrate how machines can make data interpretable to humans - the Web UI zooms in on the point and displays a time-series chart in the left-hand panel; if you move the time-slider, the dot on the map changes colour according to the temperature scale.
+9. Now - let's do an area query:
+   - To reduce the amount of data we're asking for, narrow the "Datetime" window to 12 hours
+   - Zoom out to the European area
+   - Select query type "AREA", then "RECTANGLE", then "Draw area" - draw the bounding box on the map _(don't select too large an area - this test service is limited in the amount of data it will return in a single query)_
+   - Again, you see the EDR query URL that's been built
+   - Click "Fetch" _(this can take a while depending on the time duration and bounding box size)_ - the Web UI zooms into the requested area and plots the data on the map ("CONTOURS" or "POINTS" for different plotting styles)
+   - **==TODO==** _check if there is a time-slide widget when multiple timesteps of data are retrieved (doesn't seem so yet)_
+   - _(you can draw an area with a polygon if you select "POLYGON" in the Web UI)_
+10. **Maps:** _(time allowing)_ open the Maps view: a rendered forecast map, no data handling at all.
+11. Now head back to the main catalogue search page and select the "Canadian weather forecast \[experimental\]" dataset
+    - A short explainer for the data pipeline:
+
+    ![Canadian VOF pipeline: from NWP models to OGC API – EDR](images/canadian-vof-pipeline.png)
+
+12. **Maps:**
+    - **==TODO==** _Add section for Maps request - currently giving HTTP 500 responses_
+13. **EDR:**
+    - Zoom into the Great Lakes area
+    - In the query builder only "POSITION" is available: this EDR endpoint supports only position queries (plus `instances`, its model runs). It's the same `data_queries` metadata you saw for ECMWF in point 5; open the "OGC EDR" `collection` link to compare.
+    - Click "Draw position", then add a point on the map (e.g., Toronto), select "AirTemp (Air Temperature) \[celsius\]" from the parameter list, and click "Fetch" _(we leave the "Datetime" selector with default values to select the complete time-range)_
+    - The Web UI zooms in on the selected point and shows the time-series chart in the left-hand panel _(use the time-slider to see the dot on the map change colour)_
+14. **==TODO==** _Add sections for other datasets, e.g., "Met Office Global Model forecast via OGC EDR (ICE demo, Met Office Labs)" << ==this service is currently timing out==_
+15. The point: the UI knows nothing about ECMWF or ECCC. Everything it does comes from each record's links and the collection metadata behind them (**metadata-driven**). That's why the same UI offered six query types for ECMWF and only `position` for Canada.
+
+The UI is a static web page (GitHub Pages): the browser calls the catalogue and the APIs directly. The cell below gives direct links into it for this record, and lists the record's OGC API links.
+
 ## And Beyond: integration with AI agents   
 ![slide-9-beyond.png](images/slide-9-beyond.png)  
-[time permitting]  
+_(time permitting)_  
 1. Example dataset: ++urn:wmo:md:int-ecmwf:ecmwf-opendata-ifs-0p1-oper++  
 2. Show the links in the WCMP2 metadata record   
   
