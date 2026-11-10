@@ -7,7 +7,7 @@
 import type { Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, LEAFLET_BUILD, test, type EngineName } from './engine';
+import { expect, LEAFLET_BUILD, QUICK, settleMap, stubBasemap, test, type EngineName } from './engine';
 
 const SCREENS = process.env.SCREENSHOT_DIR ?? join(process.cwd(), 'test-results', 'screens');
 const RECORD_TITLE = 'ECMWF IFS Global Deterministic Forecast (Destination Earth)';
@@ -62,7 +62,7 @@ function collectScripts(page: Page) {
   return async () => Promise.all(scripts.map(async (s) => ({ url: s.url, text: await s.text })));
 }
 
-test.describe('default build: OpenLayers only', () => {
+test.describe('default build: OpenLayers only', { tag: QUICK }, () => {
   test.skip(LEAFLET_BUILD, 'the build under test has Leaflet enabled');
 
   test('?map=leaflet, a stored choice and the toggle are gone; no Leaflet code is requested', async ({ page }) => {
@@ -168,12 +168,6 @@ test.describe('engine selection', () => {
 
 type Scenario = { name: string; run: (page: Page, engine: EngineName) => Promise<void> };
 
-const settle = async (page: Page) => {
-  await page.mouse.move(0, 0);
-  await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
-  await page.waitForTimeout(800);
-};
-
 const areaContours: Scenario['run'] = async (page, engine) => {
   await openRecordPage(page, engine, 'EDR', 'area');
   await dragBbox(page, 'Draw area');
@@ -235,8 +229,9 @@ test.describe('engines side by side', () => {
           const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
           try {
             const page = await ctx.newPage();
+            await stubBasemap(page);
             await scenario.run(page, engine);
-            await settle(page);
+            await settleMap(page);
             shots[engine] = await page.screenshot();
           } finally {
             await ctx.close();

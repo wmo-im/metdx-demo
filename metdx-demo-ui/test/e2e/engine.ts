@@ -2,18 +2,47 @@
 // `engine` option; every test then starts on that engine: the choice is put into sessionStorage (the key the app-bar
 // toggle uses) before the page's scripts run. Tests that need an explicit `?map=` use it in their own URL.
 // Everything that depends on how an engine renders (pixel probes, DOM markers) lives here, behind small helpers.
-import { test as base, expect, type Page } from '@playwright/test';
+import { test as base, expect, type BrowserContext, type Page } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 export type EngineName = 'ol' | 'leaflet';
+
+/**
+ * Tag of the smoke set (`npm run e2e` = `--grep @quick`; `npm run e2e:full` runs everything in mock-ol): the main
+ * journeys (search -> record -> EDR point + chart, Maps overlay, area contours + toggle, polygon draw) and the
+ * default-build engine checks (no Leaflet, GitHub link).
+ */
+export const QUICK = '@quick';
 
 export const ENGINE_STORAGE_KEY = 'metdx.mapEngine';
 
 /** `npm run e2e:leaflet`: the app under test was built with VITE_ENABLE_LEAFLET=1 (the default build is OpenLayers only). */
 export const LEAFLET_BUILD = process.env.E2E_LEAFLET === '1';
 
+/**
+ * Every basemap tile (OSM, the default of src/shell/mapController.ts BASEMAP_URL) is answered with one local 256x256 PNG:
+ * no network, no wait for slow tile servers, deterministic screenshots. The "with the basemap" screenshots therefore show
+ * this flat stub tile, not real map imagery; it still taints the canvas like a real cross-origin tile does. A test that
+ * wants no basemap at all registers its own route afterwards (the last registered route wins), e.g. `route.abort()`.
+ * (A build with another VITE_BASEMAP_URL needs its host added here.)
+ */
+const TILE_PNG = readFileSync(join(process.cwd(), 'test', 'fixtures', 'basemap-tile.png'));
+export async function stubBasemap(target: Page | BrowserContext) {
+  await target.route('**/tile.openstreetmap.org/**', (route) => route.fulfill({ status: 200, contentType: 'image/png', body: TILE_PNG }));
+}
+
+/** Short, bounded wait before a screenshot: pending (stubbed, so local) tile requests done, then a moment to paint. */
+export async function settleMap(page: Page) {
+  await page.mouse.move(0, 0);
+  await page.waitForLoadState('networkidle', { timeout: 3_000 }).catch(() => {});
+  await page.waitForTimeout(300);
+}
+
 export const test = base.extend<{ engine: EngineName }>({
   engine: ['ol', { option: true }],
   page: async ({ page, engine }, use) => {
+    await stubBasemap(page);
     await page.addInitScript(
       ([key, name]) => {
         try {

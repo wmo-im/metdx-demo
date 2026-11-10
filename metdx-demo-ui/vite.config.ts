@@ -35,5 +35,8 @@ export default defineConfig({
     include: ['src/**/*.test.{ts,tsx}', 'test/**/*.test.{ts,tsx}'],
     exclude: ['node_modules/**', 'server/**', 'test/e2e/**'],
     css: false,
+    // Ceiling only (a passing test returns at once): the page tests drive MUI / OpenLayers / Leaflet through
+    // userEvent and take 1-2 s alone, so the 5 s default leaves little room when all files run in parallel.
+    testTimeout: 10_000,
   },
 });

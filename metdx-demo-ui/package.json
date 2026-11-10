@@ -9,7 +9,8 @@
     "build:pages": "tsc -b && node scripts/build-pages.mjs",
     "preview": "vite preview",
     "test": "vitest run",
-    "e2e": "playwright test --project=mock-ol",
+    "e2e": "playwright test --project=mock-ol --grep @quick",
+    "e2e:full": "playwright test --project=mock-ol",
     "e2e:leaflet": "E2E_LEAFLET=1 playwright test --project=mock-ol --project=mock-leaflet",
     "e2e:live": "E2E_LIVE=1 playwright test --project=live --workers=1"
   },

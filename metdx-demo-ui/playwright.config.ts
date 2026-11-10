@@ -52,12 +52,13 @@ export default defineConfig<{ engine: 'ol' | 'leaflet' }>({
     },
   ],
   webServer: {
-    command: LEAFLET
-      ? `npx vite build --outDir dist-leaflet && npx vite preview --outDir dist-leaflet --port ${PORT} --strictPort`
-      : `npx vite build && npx vite preview --port ${PORT} --strictPort`,
+    // builds only when the build inputs changed since the last build (fingerprint, scripts/e2e-server.mjs), then serves it with vite preview
+    command: LEAFLET ? `node scripts/e2e-server.mjs ${PORT} dist-leaflet` : `node scripts/e2e-server.mjs ${PORT}`,
     env: LEAFLET ? { VITE_ENABLE_LEAFLET: '1' } : {},
     url: `http://localhost:${PORT}`,
-    reuseExistingServer: !process.env.CI,
+    // never attach to a foreign server: it would bypass the build freshness check of e2e-server.mjs (Playwright starts and
+    // stops our own server every run; the build in dist/ is what gets reused)
+    reuseExistingServer: false,
     timeout: 180_000,
   },
 });

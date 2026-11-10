@@ -68,7 +68,7 @@ describe('MapsPage', () => {
   });
 
   it('updates the URL for bbox, size and level', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     setup();
     await waitFor(() => expect(urlBox().value).toContain('parameter-name=2t'));
     const bbox = screen.getByLabelText(/BBOX \(minLon/);
@@ -85,7 +85,7 @@ describe('MapsPage', () => {
   });
 
   it('sets the bbox field from a drawn rectangle', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     vi.spyOn(ctrl, 'drawGeometry').mockResolvedValue({
       type: 'Polygon',
       coordinates: [[[5.1234, 40], [15, 40], [15, 55.5559], [5.1234, 55.5559], [5.1234, 40]]],
@@ -98,7 +98,7 @@ describe('MapsPage', () => {
   });
 
   it('fetches the PNG and overlays it on the map at the bbox', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const overlay = vi.spyOn(ctrl, 'setOverlay');
     setup();
     await waitFor(() => expect(urlBox().value).toContain('parameter-name=2t'));
@@ -113,7 +113,7 @@ describe('MapsPage', () => {
   });
 
   it('shows an error when the server fails', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     setup();
     await waitFor(() => expect(urlBox().value).toContain('parameter-name=2t'));
     await user.click(urlBox());
@@ -123,7 +123,7 @@ describe('MapsPage', () => {
   });
 
   it('a map request that never answers can be cancelled', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     setFetchImpl((input, init) =>
       unproxyUrl(input).includes('/map?')
         ? new Promise<Response>((_res, rej) =>
@@ -142,7 +142,7 @@ describe('MapsPage', () => {
   });
 
   it('navigating away aborts the active request and ignores a late completion', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let signal: AbortSignal | undefined;
     let finish: (() => void) | undefined;
     const overlay = vi.spyOn(ctrl, 'setOverlay');

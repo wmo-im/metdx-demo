@@ -316,11 +316,14 @@ export function describePoints(points: Position[], mode?: EdrMode, areaShape: Ar
 
 /* ----------------------------------------------------------------- datetime */
 
-/** `YYYY-MM-DD` + `HH:MM` -> `YYYY-MM-DDTHH:MM:00Z` (time defaults to 00:00:00). */
+/**
+ * `YYYY-MM-DD` + `HH:MM` (or `HH:MM:SS[.fff]`, kept as is) -> `YYYY-MM-DDTHH:MM:SSZ`
+ * (time defaults to 00:00:00).
+ */
 export function makeIso(date?: string | null, time?: string | null): string | null {
   const d = date?.trim() ?? '';
   const t = time?.trim() ?? '';
-  if (d && t) return `${d}T${t}:00Z`;
+  if (d && t) return t.split(':').length > 2 ? `${d}T${t}Z` : `${d}T${t}:00Z`;
   if (d) return `${d}T00:00:00Z`;
   return null;
 }
@@ -372,9 +375,179 @@ export function defaultDatetime(mode: EdrMode, temporal: TemporalExtent, start?:
   return { ...fields, endDate: e.date, endTime: e.time };
 }
 
-/** ISO timestamp -> `{date, time}` text-field values (`time` defaults to `00:00`). */
+/* ------------------------------------------------ available times (temporal `values`) */
+
+/** Upper bound on the expanded instants (a `PT1S` series over years would freeze the tab). */
+export const MAX_TEMPORAL_VALUES = 20_000;
+
+export interface ExpandedTimes {
+  /** Sorted, de-duplicated `YYYY-MM-DDTHH:MM:SSZ` instants. */
+  times: string[];
+  /** The expansion hit {@link MAX_TEMPORAL_VALUES} and `times` is incomplete. */
+  capped: boolean;
+}
+
+/** An ISO 8601 date-time (no zone = UTC) -> epoch ms, or `null`. */
+function parseInstant(s: string): number | null {
+  const t = s.trim();
+  if (!/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/i.test(t)) return null;
+  const ms = Date.parse(/T.*(Z|[+-]\d{2}:?\d{2})$/i.test(t) || !t.includes('T') ? t : `${t}Z`);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+const toIso = (ms: number): string => new Date(ms).toISOString().replace(/\.000Z$/, 'Z');
+
+/** An ISO 8601 duration -> calendar months and fixed milliseconds; `null` when invalid or zero. */
+function parseDuration(s: string): { months: number; ms: number } | null {
+  const m = s.trim().match(/^P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/i);
+  if (!m || /T$/i.test(s.trim())) return null;
+  const n = (i: number) => (m[i] ? Number(m[i]) : 0);
+  const months = n(1) * 12 + n(2);
+  const ms = (n(3) * 7 + n(4)) * DAY_MS + n(5) * 3600_000 + n(6) * 60_000 + n(7) * 1000;
+  if (!Number.isFinite(months) || !Number.isFinite(ms)) return null;
+  return months > 0 || ms > 0 ? { months, ms } : null;
+}
+
+function addMonths(ms: number, months: number): number {
+  const d = new Date(ms);
+  const day = d.getUTCDate();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() + months);
+  const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  d.setUTCDate(Math.min(day, last));
+  return d.getTime();
+}
+
+/**
+ * The instants a temporal `values` list (OGC EDR) offers. Each entry is an ISO instant or a
+ * `start/end/period` interval (`PT1H`, `PT30M`, `P1D`, `P1DT6H`, ...); other entries are ignored.
+ * Capped at {@link MAX_TEMPORAL_VALUES}.
+ */
+export function expandTemporalValues(values: unknown, max = MAX_TEMPORAL_VALUES): ExpandedTimes {
+  const set = new Set<number>();
+  let capped = false;
+  const add = (ms: number): boolean => {
+    if (set.size >= max && !set.has(ms)) {
+      capped = true;
+      return false;
+    }
+    set.add(ms);
+    return true;
+  };
+  const entries = Array.isArray(values) ? values : typeof values === 'string' ? [values] : [];
+  for (const raw of entries) {
+    if (typeof raw !== 'string') continue;
+    for (const entry of raw.split(',')) {
+      const parts = entry.trim().split('/');
+      if (parts.length === 1) {
+        const t = parseInstant(parts[0]);
+        if (t != null) add(t);
+      } else if (parts.length === 3) {
+        const a = parseInstant(parts[0]);
+        const b = parseInstant(parts[1]);
+        const p = parseDuration(parts[2]);
+        if (a == null || b == null || !p || !Number.isFinite(a) || !Number.isFinite(b) || b < a) continue;
+        // Bounded (max + 1 points are enough to know the list is capped) and strictly increasing, so an
+        // out-of-range / NaN step (e.g. `P999999999M`) ends the segment instead of looping forever.
+        let prev = -Infinity;
+        let done = false;
+        for (let i = 0; i <= max + 1; i++) {
+          const t = (p.months ? addMonths(a, p.months * i) : a) + p.ms * i;
+          if (!Number.isFinite(t) || t <= prev || t > b) {
+            done = true;
+            break;
+          }
+          if (!add(t)) {
+            done = true;
+            break;
+          }
+          prev = t;
+        }
+        if (!done) capped = true;
+      }
+    }
+  }
+  const times = [...set]
+    .sort((x, y) => x - y)
+    .map(toIso)
+    .filter((s) => /^\d{4}-/.test(s));
+  return { times, capped };
+}
+
+/** The temporal `values` of a collection / instance document (`null` without any usable instant). */
+export function parseTemporalValues(data: unknown): ExpandedTimes | null {
+  const d = (data ?? {}) as Json;
+  const ext = (d.extents ?? d.extent ?? {}) as Json;
+  const e = expandTemporalValues(ext.temporal?.values);
+  return e.times.length ? e : null;
+}
+
+/** The distinct `YYYY-MM-DD` dates of a sorted instant list. */
+export function availableDates(times: string[]): string[] {
+  const out: string[] = [];
+  for (const t of times) {
+    const d = t.slice(0, 10);
+    if (out[out.length - 1] !== d) out.push(d);
+  }
+  return out;
+}
+
+/** The time labels (`HH:MM`, or `HH:MM:SS[.fff]` when the seconds are not zero) of a sorted instant list on `date` (`YYYY-MM-DD`). */
+export function timesOnDate(times: string[], date: string): string[] {
+  return times.filter((t) => t.startsWith(`${date}T`)).map((t) => splitIso(t).time);
+}
+
+/**
+ * Default start/end for a query type from the available instants: start = first one;
+ * position (time series): end = latest one <= start + 1 day; everything else: end = start.
+ */
+export function defaultDatetimeFromTimes(mode: EdrMode, times: string[]): DatetimeFields | null {
+  if (!times.length) return null;
+  const s = splitIso(times[0]);
+  let end = times[0];
+  if (mode === 'position') {
+    const limit = Date.parse(times[0]) + DAY_MS;
+    end = [...times].reverse().find((t) => Date.parse(t) <= limit) ?? times[times.length - 1];
+  }
+  const e = splitIso(end);
+  return { startDate: s.date, startTime: s.time, endDate: e.date, endTime: e.time };
+}
+
+function stepLabel(ms: number): string {
+  const min = ms / 60_000;
+  if (ms % DAY_MS === 0) return ms === DAY_MS ? 'daily' : `${ms / DAY_MS}-daily`;
+  if (min % 60 === 0) return min === 60 ? 'hourly' : `${min / 60}-hourly`;
+  if (Number.isInteger(min)) return `every ${min} min`;
+  return `every ${ms / 1000} s`;
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const dayHour = (t: string) => `${Number(t.slice(8, 10))} ${MONTHS[Number(t.slice(5, 7)) - 1]} ${t.slice(11, 16)}`;
+
+/** Short description of how the step changes, e.g. `hourly to 12 Nov 18:00, then 3-hourly to 15 Nov 00:00, then 6-hourly`. */
+export function describeSteps(times: string[]): string {
+  if (times.length < 2) return '';
+  const segs: { step: number; end: string }[] = [];
+  for (let i = 1; i < times.length; i++) {
+    const gap = Date.parse(times[i]) - Date.parse(times[i - 1]);
+    const last = segs[segs.length - 1];
+    if (last && last.step === gap) last.end = times[i];
+    else segs.push({ step: gap, end: times[i] });
+  }
+  if (segs.length === 1) return stepLabel(segs[0].step);
+  if (segs.length > 4) return 'irregular steps';
+  return segs.map((s, i) => (i < segs.length - 1 ? `${stepLabel(s.step)} to ${dayHour(s.end)}` : stepLabel(s.step))).join(', then ');
+}
+
+/**
+ * ISO timestamp -> `{date, time}` text-field values. `time` is `HH:MM` (default `00:00`), or
+ * `HH:MM:SS[.fff]` when the seconds are not zero, so the instant is not truncated.
+ */
 export function splitIso(ts: string): { date: string; time: string } {
-  return { date: ts.slice(0, 10), time: ts.length > 11 ? ts.slice(11, 16) : '00:00' };
+  const m = ts.slice(11).match(/^(\d{2}:\d{2})(?::(\d{2}(?:\.\d+)?))?/);
+  const secs = m?.[2];
+  const time = !m ? '00:00' : secs && Number(secs) !== 0 ? `${m[1]}:${secs}` : m[1];
+  return { date: ts.slice(0, 10), time };
 }
 
 /* ----------------------------------------------------------------- metadata */

@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  availableDates,
   availableModes,
   buildEdrUrl,
   collectionBase,
   collectionJsonUrl,
   combineDatetime,
   defaultDatetime,
+  defaultDatetimeFromTimes,
+  describeSteps,
+  expandTemporalValues,
   DEFAULT_CORRIDOR_HEIGHT,
   HEIGHT_UNITS,
   describePoints,
@@ -21,9 +25,11 @@ import {
   parseTemporal,
   parseTimeSeries,
   paramLabel,
+  parseTemporalValues,
   pyFloat,
   queryGeometry,
   splitIso,
+  timesOnDate,
   type EdrQuery,
 } from './edr';
 import collection from '../../test/fixtures/collections/operational-data.json';
@@ -418,5 +424,152 @@ describe('parseTimeSeries', () => {
     expect(parseTimeSeries(null)).toEqual([]);
     expect(parseTimeSeries({ type: 'FeatureCollection' })).toEqual([]);
     expect(parseTimeSeries(cov([1, 2]))).toEqual([]); // length mismatch with the time axis
+  });
+});
+
+describe('temporal values', () => {
+  const MIXED = [
+    '2026-11-09T00:00:00Z/2026-11-12T18:00:00Z/PT1H',
+    '2026-11-12T21:00:00Z/2026-11-15T00:00:00Z/PT3H',
+    '2026-11-15T06:00:00Z/2026-11-19T00:00:00Z/PT6H',
+  ];
+
+  it('expands mixed steps, sorted and without duplicates', () => {
+    const { times, capped } = expandTemporalValues(MIXED);
+    expect(capped).toBe(false);
+    expect(times[0]).toBe('2026-11-09T00:00:00Z');
+    expect(times.at(-1)).toBe('2026-11-19T00:00:00Z');
+    // 4 days hourly (+18 h) + 3-hourly 12 Nov 21:00 .. 15 Nov 00:00 + 6-hourly 15 Nov 06:00 .. 19 Nov 00:00
+    expect(times).toHaveLength(3 * 24 + 19 + 17 + 17);
+    expect([...times].sort()).toEqual(times);
+    expect(expandTemporalValues([...MIXED, ...MIXED]).times).toEqual(times);
+  });
+
+  it('offers 1 h / 3 h / 6 h times per date, and handles the boundary dates', () => {
+    const { times } = expandTemporalValues(MIXED);
+    expect(availableDates(times)).toHaveLength(11);
+    expect(availableDates(times)[0]).toBe('2026-11-09');
+    expect(timesOnDate(times, '2026-11-10')).toHaveLength(24);
+    // the day the step changes: hourly to 18:00, then 3-hourly
+    expect(timesOnDate(times, '2026-11-12')).toEqual([...Array(19).keys()].map((h) => `${String(h).padStart(2, '0')}:00`).concat(['21:00']));
+    expect(timesOnDate(times, '2026-11-13')).toEqual(['00:00', '03:00', '06:00', '09:00', '12:00', '15:00', '18:00', '21:00']);
+    // 15 Nov: 00:00 (3-hourly part), then the 6-hourly part starts at 06:00 (a gap, nothing at 03:00)
+    expect(timesOnDate(times, '2026-11-15')).toEqual(['00:00', '06:00', '12:00', '18:00']);
+    expect(timesOnDate(times, '2026-11-19')).toEqual(['00:00']);
+    expect(timesOnDate(times, '2026-11-20')).toEqual([]);
+    expect(timesOnDate(times, '2026-11-08')).toEqual([]);
+  });
+
+  it('accepts a plain list of instants and mixes it with intervals', () => {
+    const { times } = expandTemporalValues(['2026-11-09T06:00:00Z', '2026-11-08T12:00:00Z', '2026-11-09T06:00:00Z', '2026-11-10T00:00:00Z/2026-11-10T02:00:00Z/PT1H']);
+    expect(times).toEqual(['2026-11-08T12:00:00Z', '2026-11-09T06:00:00Z', '2026-11-10T00:00:00Z', '2026-11-10T01:00:00Z', '2026-11-10T02:00:00Z']);
+  });
+
+  it('supports PTnM, PnD, P1DT6H and P1M durations, and instants without seconds / zone', () => {
+    expect(expandTemporalValues(['2026-01-01T00:00Z/2026-01-01T01:00Z/PT30M']).times).toEqual(['2026-01-01T00:00:00Z', '2026-01-01T00:30:00Z', '2026-01-01T01:00:00Z']);
+    expect(expandTemporalValues(['2026-01-01/2026-01-03/P1D']).times).toEqual(['2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z', '2026-01-03T00:00:00Z']);
+    expect(expandTemporalValues(['2026-01-01T00:00:00Z/2026-01-03T00:00:00Z/P1DT6H']).times).toEqual([
+      '2026-01-01T00:00:00Z',
+      '2026-01-02T06:00:00Z',
+    ]);
+    expect(expandTemporalValues(['2026-01-31T00:00:00Z/2026-04-30T00:00:00Z/P1M']).times).toEqual([
+      '2026-01-31T00:00:00Z',
+      '2026-02-28T00:00:00Z',
+      '2026-03-31T00:00:00Z',
+      '2026-04-30T00:00:00Z',
+    ]);
+    expect(expandTemporalValues(['2026-01-01T00:00:00', '2026-01-01T03:00:00+01:00']).times).toEqual(['2026-01-01T00:00:00Z', '2026-01-01T02:00:00Z']);
+  });
+
+  it('ignores bad strings and invalid intervals', () => {
+    const bad = [
+      'nope',
+      '',
+      42,
+      null,
+      '2026-13-45T00:00:00Z',
+      '2026-01-01T00:00:00Z/2026-01-02T00:00:00Z', // no period
+      '2026-01-01T00:00:00Z/2026-01-02T00:00:00Z/PT0H', // zero step
+      '2026-01-01T00:00:00Z/2026-01-02T00:00:00Z/XYZ',
+      '2026-01-02T00:00:00Z/2026-01-01T00:00:00Z/PT1H', // end before start
+      '2026-01-01T00:00:00Z/2026-01-02T00:00:00Z/PT',
+    ];
+    expect(expandTemporalValues(bad)).toEqual({ times: [], capped: false });
+    expect(expandTemporalValues([...bad, '2026-02-01T00:00:00Z']).times).toEqual(['2026-02-01T00:00:00Z']);
+    expect(expandTemporalValues(undefined)).toEqual({ times: [], capped: false });
+    expect(expandTemporalValues({})).toEqual({ times: [], capped: false });
+  });
+
+  it('caps huge expansions and flags it', () => {
+    const r = expandTemporalValues(['2026-01-01T00:00:00Z/2036-01-01T00:00:00Z/PT1S']);
+    expect(r.capped).toBe(true);
+    expect(r.times).toHaveLength(20_000);
+    expect(expandTemporalValues(['2026-01-01T00:00:00Z/2026-01-01T00:00:10Z/PT1S'], 5)).toMatchObject({ capped: true });
+    expect(expandTemporalValues(['2026-01-01T00:00:00Z/2026-01-01T00:00:04Z/PT1S'], 5).capped).toBe(false);
+  });
+
+  it('terminates on huge / non-finite steps and dates (no endless loop)', () => {
+    // P999999999M overflows the Date range -> NaN: only the start is offered
+    expect(expandTemporalValues(['2026-01-01/2026-01-02/P999999999M'])).toEqual({ times: ['2026-01-01T00:00:00Z'], capped: false });
+    expect(expandTemporalValues(['2026-01-01/2026-01-02/P999999999Y']).times).toEqual(['2026-01-01T00:00:00Z']);
+    expect(expandTemporalValues(['2026-01-01/2026-01-02/P99999999999999999999D']).times).toEqual(['2026-01-01T00:00:00Z']);
+    expect(expandTemporalValues([`2026-01-01/2026-01-02/P${'9'.repeat(400)}D`]).times).toEqual([]); // Infinity step: rejected
+    // zero steps, non-finite / unparsable dates and an end before the start are ignored
+    expect(expandTemporalValues(['2026-01-01/2026-01-02/P0D', '2026-01-01/2026-01-02/PT0S', '2026-01-01/2026-01-02/P0M']).times).toEqual([]);
+    expect(expandTemporalValues(['NaN/2026-01-02/PT1H', '2026-01-01/Infinity/PT1H', '2026-01-02/2026-01-01/PT1H', '2026-01-01/2026-01-02/-PT1H']).times).toEqual([]);
+  });
+
+  it('a segment that would exceed the cap stops at it, even when other segments already filled the list', () => {
+    const seg = '2026-01-01T00:00:00Z/2026-01-01T00:00:59Z/PT1S';
+    const r = expandTemporalValues([seg, seg], 10);
+    expect(r.capped).toBe(true);
+    expect(r.times).toHaveLength(10);
+    // a second segment re-offering the same (already counted) instants is not a reason to loop on
+    expect(expandTemporalValues(['2026-01-01T00:00:00Z/2026-01-01T00:00:04Z/PT1S', '2026-01-01T00:00:00Z/2026-01-01T00:00:04Z/PT1S'], 5)).toEqual({
+      times: ['2026-01-01T00:00:00Z', '2026-01-01T00:00:01Z', '2026-01-01T00:00:02Z', '2026-01-01T00:00:03Z', '2026-01-01T00:00:04Z'],
+      capped: false,
+    });
+  });
+
+  it('keeps the seconds of an instant, down to the label and the URL value', () => {
+    const { times } = expandTemporalValues(['2026-11-09T00:00:30Z', '2026-11-09T01:00:00Z', '2026-11-09T02:00:15.5Z']);
+    expect(times).toEqual(['2026-11-09T00:00:30Z', '2026-11-09T01:00:00Z', '2026-11-09T02:00:15.500Z']);
+    expect(timesOnDate(times, '2026-11-09')).toEqual(['00:00:30', '01:00', '02:00:15.500']);
+    expect(splitIso('2026-11-09T00:00:30Z')).toEqual({ date: '2026-11-09', time: '00:00:30' });
+    expect(splitIso('2026-11-09T00:00:00Z').time).toBe('00:00');
+    // label -> URL value round trip
+    for (const t of times) {
+      const { date, time } = splitIso(t);
+      expect(makeIso(date, time)).toBe(t);
+    }
+    expect(combineDatetime('2026-11-09', '00:00:30', '2026-11-09', '00:00:30')).toBe('2026-11-09T00:00:30Z');
+    expect(defaultDatetimeFromTimes('area', times)).toMatchObject({ startTime: '00:00:30', endTime: '00:00:30' });
+  });
+
+  it('parseTemporalValues reads extent / extents, and is null without values', () => {
+    expect(parseTemporalValues({ extent: { temporal: { values: ['2026-01-01T00:00:00Z'] } } })?.times).toEqual(['2026-01-01T00:00:00Z']);
+    expect(parseTemporalValues({ extents: { temporal: { values: ['2026-01-02T00:00:00Z'] } } })?.times).toEqual(['2026-01-02T00:00:00Z']);
+    expect(parseTemporalValues(collection)).toBeNull();
+    expect(parseTemporalValues({ extent: { temporal: { values: ['junk'] } } })).toBeNull();
+    expect(parseTemporalValues(null)).toBeNull();
+  });
+
+  it('defaultDatetimeFromTimes snaps to the available steps', () => {
+    const { times } = expandTemporalValues(MIXED);
+    expect(defaultDatetimeFromTimes('position', times)).toEqual({ startDate: '2026-11-09', startTime: '00:00', endDate: '2026-11-10', endTime: '00:00' });
+    expect(defaultDatetimeFromTimes('area', times)).toEqual({ startDate: '2026-11-09', startTime: '00:00', endDate: '2026-11-09', endTime: '00:00' });
+    // start + 1 day is not an available time: the latest one before it
+    const sparse = ['2026-11-09T00:00:00Z', '2026-11-09T18:00:00Z', '2026-11-10T06:00:00Z'];
+    expect(defaultDatetimeFromTimes('position', sparse)).toMatchObject({ endDate: '2026-11-09', endTime: '18:00' });
+    expect(defaultDatetimeFromTimes('position', ['2026-11-09T00:00:00Z'])).toMatchObject({ endDate: '2026-11-09', endTime: '00:00' });
+    expect(defaultDatetimeFromTimes('position', [])).toBeNull();
+  });
+
+  it('describeSteps summarises the step changes', () => {
+    expect(describeSteps(expandTemporalValues(MIXED).times)).toBe('hourly to 12 Nov 18:00, then 3-hourly to 15 Nov 00:00, then 6-hourly');
+    expect(describeSteps(expandTemporalValues(['2026-01-01T00:00:00Z/2026-01-02T00:00:00Z/PT6H']).times)).toBe('6-hourly');
+    expect(describeSteps(expandTemporalValues(['2026-01-01/2026-01-03/P1D']).times)).toBe('daily');
+    expect(describeSteps(expandTemporalValues(['2026-01-01T00:00:00Z/2026-01-01T01:00:00Z/PT15M']).times)).toBe('every 15 min');
+    expect(describeSteps(['2026-01-01T00:00:00Z'])).toBe('');
   });
 });

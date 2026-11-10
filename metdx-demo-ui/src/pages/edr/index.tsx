@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Alert,
+  Autocomplete,
   Box,
   Button,
   Chip,
@@ -34,16 +35,20 @@ import {
   MODE_HELP,
   RADIUS_UNITS,
   WIDTH_UNITS,
+  availableDates,
   availableModes,
   buildEdrUrl,
   collectionBase,
   collectionJsonUrl,
   combineDatetime,
   defaultDatetime,
+  defaultDatetimeFromTimes,
+  describeSteps,
   describePoints,
   drawKindFor,
   geometryToPoints,
   instanceUrl,
+  makeIso,
   instancesUrl,
   needsLevel,
   paramLabel,
@@ -51,7 +56,9 @@ import {
   parseInstances,
   parseNumber,
   parseTemporal,
+  parseTemporalValues,
   queryGeometry,
+  timesOnDate,
   type AreaShape,
   type EdrCollectionInfo,
   type EdrMode,
@@ -125,6 +132,40 @@ function Section({ title, children, action }: { title: string; children: ReactNo
   );
 }
 
+/** A typeable dropdown of the offered values (an `Autocomplete`: typing filters the list). */
+/** The instants >= `startIso` (compared as times: `…:30.5Z` sorts before `…:30Z` as text). */
+const fromStart = (times: string[], startIso: string): string[] => {
+  const s = Date.parse(startIso);
+  return Number.isNaN(s) ? times : times.filter((t) => Date.parse(t) >= s);
+};
+
+function PickField({
+  label,
+  value,
+  options,
+  onChange,
+  flex,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  onChange: (v: string) => void;
+  flex: number;
+}) {
+  return (
+    <Autocomplete
+      size="small"
+      options={options}
+      value={options.includes(value) ? value : null}
+      onChange={(_, v) => v && onChange(v)}
+      autoHighlight
+      noOptionsText="No such time available"
+      renderInput={(p) => <TextField {...p} label={label} />}
+      sx={{ flex }}
+    />
+  );
+}
+
 function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
   const { id: recordId } = useParams();
   const map = useMap();
@@ -183,18 +224,26 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
   const effectiveInstance = useInstance && instanceId ? instanceId : null;
 
   // The extent the date fields default from (collection or instance), and whether the user has typed in them.
-  const [base, setBase] = useState<{ t: TemporalExtent; fallbackToday: boolean } | null>(null);
+  const [base, setBase] = useState<{ t: TemporalExtent; times: string[] | null; fallbackToday: boolean } | null>(null);
   const datesEdited = useRef(false);
 
   // A new extent (collection load, instance switch) re-applies the defaults, dropping earlier edits.
-  const applyTemporal = useCallback((t: TemporalExtent, label: string, fallbackToday: boolean) => {
+  const applyTemporal = useCallback((t: TemporalExtent, label: string, fallbackToday: boolean, data: unknown) => {
+    // The offered instants (`values`), when listed in full; a capped (incomplete) list would hide valid times.
+    const expanded = parseTemporalValues(data);
+    const times = expanded && !expanded.capped ? expanded.times : null;
     const parts: string[] = [];
     if (t.start) parts.push(`from ${t.start.slice(0, 16)}`);
     if (t.end) parts.push(`to ${t.end.slice(0, 16)}`);
     else if (t.start) parts.push('to now');
-    setDtHint(parts.length ? `${label}: ${parts.join(' ')}` : '');
+    let hint = parts.length ? `${label}: ${parts.join(' ')}` : '';
+    if (times) {
+      const steps = describeSteps(times);
+      if (steps) hint += `${hint ? '. ' : ''}Steps: ${steps}`;
+    }
+    setDtHint(hint);
     datesEdited.current = false;
-    setBase({ t, fallbackToday });
+    setBase({ t, times, fallbackToday });
   }, []);
 
   // Defaults per query type (a whole extent can be hundreds of MB): position = first step + 1 day (a time
@@ -202,7 +251,7 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
   useEffect(() => {
     if (!base || datesEdited.current) return;
     const today = base.fallbackToday ? `${new Date().toISOString().slice(0, 10)}T00:00:00Z` : null;
-    const d = defaultDatetime(mode, base.t, today);
+    const d = base.times ? defaultDatetimeFromTimes(mode, base.times) : defaultDatetime(mode, base.t, today);
     if (d) {
       setStartDate(d.startDate);
       setStartTime(d.startTime);
@@ -219,6 +268,44 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
     set(e.target.value);
   };
 
+  // With a list of available instants the fields are dropdowns: the times follow the chosen date, and the end
+  // only offers instants >= the start.
+  const times = base?.times ?? null;
+  const startIso = makeIso(startDate, startTime) ?? '';
+  const pick = useMemo(() => {
+    if (!times) return null;
+    const from = fromStart(times, startIso);
+    return {
+      startDates: availableDates(times),
+      startTimes: timesOnDate(times, startDate),
+      endDates: availableDates(from),
+      endTimes: timesOnDate(from, endDate),
+    };
+  }, [times, startIso, startDate, endDate]);
+
+  /** A new start (date, time kept when offered on it, else the first one); an end before it follows it. */
+  const chooseStart = (date: string, time: string | null) => {
+    if (!times) return;
+    datesEdited.current = true;
+    const onDate = timesOnDate(times, date);
+    const t = time && onDate.includes(time) ? time : onDate[0];
+    if (!t) return;
+    setStartDate(date);
+    setStartTime(t);
+    if (Date.parse(makeIso(endDate, endTime) ?? '') < Date.parse(makeIso(date, t) ?? '')) {
+      setEndDate(date);
+      setEndTime(t);
+    }
+  };
+  const chooseEndDate = (date: string) => {
+    if (!times) return;
+    datesEdited.current = true;
+    const onDate = timesOnDate(fromStart(times, startIso), date);
+    if (!onDate.length) return;
+    setEndDate(date);
+    setEndTime(onDate.includes(endTime) ? endTime : onDate[0]);
+  };
+
   // Collection document + instance list (loaded once per collection).
   useEffect(() => {
     let live = true;
@@ -226,11 +313,12 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
       (data) => {
         if (!live) return;
         const c = parseCollection(data);
+        collectionData.current = data;
         setInfo(c);
         const avail = availableModes(c.modes);
         setMode((m) => (avail.length && !avail.includes(m) ? avail[0] : m));
         map.showExtent(c.bbox);
-        applyTemporal(c.temporal, 'Available', true);
+        applyTemporal(c.temporal, 'Available', true, data);
       },
       (e) => live && setInfoError(errorMessage(e)),
     );
@@ -250,12 +338,13 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
 
   // Datetime range follows the selected instance (and goes back to the collection's range without one).
   const collectionTemporal = info?.temporal;
+  const collectionData = useRef<unknown>(null);
   const hadInstance = useRef(false);
   useEffect(() => {
     if (!effectiveInstance) {
       if (hadInstance.current) {
         hadInstance.current = false;
-        if (collectionTemporal) applyTemporal(collectionTemporal, 'Available', true);
+        if (collectionTemporal) applyTemporal(collectionTemporal, 'Available', true, collectionData.current);
       }
       return;
     }
@@ -263,7 +352,7 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
     let live = true;
     setDtHint('Loading forecast range...');
     fetchJson(instanceUrl(collectionUrl, effectiveInstance)).then(
-      (data) => live && applyTemporal(parseTemporal(data), 'Valid range', false),
+      (data) => live && applyTemporal(parseTemporal(data), 'Valid range', false, data),
       (e) => live && setDtHint(`Could not load instance details: ${errorMessage(e)}`),
     );
     return () => {
@@ -718,15 +807,40 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
           {mode === 'position'
             ? 'Starts with the first available step and the following day. Edit the dates to query another range.'
             : 'Starts with a single time (the first available step). Set a later end to query a range.'}
+          {times ? ' Only available times can be chosen.' : ''}
         </Typography>
-        <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
-          <TextField size="small" label="Start date" placeholder="YYYY-MM-DD" value={startDate} onChange={editDate(setStartDate)} sx={{ flex: 2 }} />
-          <TextField size="small" label="Start time" placeholder="HH:MM" value={startTime} onChange={editDate(setStartTime)} sx={{ flex: 1 }} />
-        </Stack>
-        <Stack direction="row" spacing={1}>
-          <TextField size="small" label="End date" placeholder="YYYY-MM-DD" value={endDate} onChange={editDate(setEndDate)} sx={{ flex: 2 }} />
-          <TextField size="small" label="End time" placeholder="HH:MM" value={endTime} onChange={editDate(setEndTime)} sx={{ flex: 1 }} />
-        </Stack>
+        {pick ? (
+          <>
+            <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
+              <PickField label="Start date" value={startDate} options={pick.startDates} onChange={(d) => chooseStart(d, startTime)} flex={2} />
+              <PickField label="Start time" value={startTime} options={pick.startTimes} onChange={(t) => chooseStart(startDate, t)} flex={1} />
+            </Stack>
+            <Stack direction="row" spacing={1}>
+              <PickField label="End date" value={endDate} options={pick.endDates} onChange={chooseEndDate} flex={2} />
+              <PickField
+                label="End time"
+                value={endTime}
+                options={pick.endTimes}
+                onChange={(t) => {
+                  datesEdited.current = true;
+                  setEndTime(t);
+                }}
+                flex={1}
+              />
+            </Stack>
+          </>
+        ) : (
+          <>
+            <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
+              <TextField size="small" label="Start date" placeholder="YYYY-MM-DD" value={startDate} onChange={editDate(setStartDate)} sx={{ flex: 2 }} />
+              <TextField size="small" label="Start time" placeholder="HH:MM" value={startTime} onChange={editDate(setStartTime)} sx={{ flex: 1 }} />
+            </Stack>
+            <Stack direction="row" spacing={1}>
+              <TextField size="small" label="End date" placeholder="YYYY-MM-DD" value={endDate} onChange={editDate(setEndDate)} sx={{ flex: 2 }} />
+              <TextField size="small" label="End time" placeholder="HH:MM" value={endTime} onChange={editDate(setEndTime)} sx={{ flex: 1 }} />
+            </Stack>
+          </>
+        )}
       </Section>
 
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>

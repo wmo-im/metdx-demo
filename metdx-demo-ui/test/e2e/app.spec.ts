@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, expectMapRendered, shotName, test } from './engine';
+import { expect, QUICK, expectMapRendered, settleMap, shotName, test } from './engine';
 
 const SCREENS = process.env.SCREENSHOT_DIR ?? join(process.cwd(), 'test-results', 'screens');
 const RECORD_TITLE = 'ECMWF IFS Global Deterministic Forecast (Destination Earth)';
@@ -22,15 +22,6 @@ async function mapBox(page: Page) {
   return box;
 }
 
-/**
- * Let the live OSM basemap tiles load before a screenshot: best effort and BOUNDED. A bare
- * `waitForLoadState('networkidle')` has no timeout of its own (it runs up to the test's 30 s), so with slow/offline
- * tile requests (or many parallel workers) it ate the whole test budget and the test failed with a timeout.
- */
-async function settleBasemap(page: Page) {
-  await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {});
-}
-
 test.beforeAll(() => mkdirSync(SCREENS, { recursive: true }));
 
 test('catalogue lists the default-query records with service badges', async ({ page, engine }) => {
@@ -47,7 +38,7 @@ test('catalogue lists the default-query records with service badges', async ({ p
   await expect(msc.getByTestId('badge-edr')).toHaveCount(0);
   await expect(msc.getByTestId('badge-maps')).toHaveCount(0);
   await expectMapRendered(page, engine);
-  await settleBasemap(page);
+  await settleMap(page);
   await page.screenshot({ path: `${SCREENS}/${shotName('catalogue', engine)}.png` });
 });
 
@@ -147,7 +138,7 @@ test('opening a record with a regional footprint zooms to it, with context aroun
   expect(v[3] - v[1]).toBeGreaterThan(europe[3] - europe[1]);
 });
 
-test('search -> record -> EDR -> draw point -> Fetch shows JSON and chart', async ({ page, engine }) => {
+test('search -> record -> EDR -> draw point -> Fetch shows JSON and chart', { tag: QUICK }, async ({ page, engine }) => {
   await openRecord(page);
   await page.getByRole('link', { name: 'EDR', exact: true }).click();
   await expect(page.getByTestId('page-edr')).toBeVisible();
@@ -164,9 +155,7 @@ test('search -> record -> EDR -> draw point -> Fetch shows JSON and chart', asyn
   await expect(page.getByLabel('Request URL')).toHaveValue(/\/position\?coords=POINT\(/);
   await expect(page.getByLabel('Request URL')).toHaveValue(/parameter-name=/);
 
-  await page.mouse.move(0, 0);
-  await settleBasemap(page);
-  await page.waitForTimeout(500); // let MUI label/ripple transitions settle
+  await settleMap(page);
   await page.screenshot({ path: `${SCREENS}/${shotName('edr', engine)}.png` });
 
   await page.getByRole('button', { name: 'Fetch' }).click();
@@ -177,7 +166,7 @@ test('search -> record -> EDR -> draw point -> Fetch shows JSON and chart', asyn
   await expect(page.getByRole('dialog').getByTestId('result-json')).toContainText('"type": "Coverage');
 });
 
-test('record -> Maps -> draw bbox -> Fetch puts an image overlay on the map', async ({ page }) => {
+test('record -> Maps -> draw bbox -> Fetch puts an image overlay on the map', { tag: QUICK }, async ({ page }) => {
   await openRecord(page);
   await page.getByRole('link', { name: 'OGC Maps', exact: true }).click();
   await expect(page.getByTestId('page-maps')).toBeVisible();
@@ -272,4 +261,32 @@ test('EDR defaults: position = first step + 1 day, other modes a single step, an
   await page.getByRole('button', { name: 'corridor', exact: true }).click();
   await expect(page.getByLabel('End date')).toHaveValue('2026-10-19');
   await expect(page.getByLabel('Corridor height (optional)')).toHaveValue('10');
+});
+
+test('EDR datetime dropdowns offer only the available times, depending on the date', async ({ page }) => {
+  await page.goto('/?mock=1');
+  const col = 'https://polytope-edr.lumi.apps.dte.destination-earth.eu/collections/stepped-data';
+  await page.goto(`/record/${encodeURIComponent('urn:test:stepped')}/edr?col=${encodeURIComponent(col)}`);
+  await expect(page.getByRole('button', { name: 'position', exact: true })).toBeVisible();
+  await expect(page.getByLabel('Start date')).toHaveValue('2026-11-09');
+  await expect(page.getByLabel('End date')).toHaveValue('2026-11-10');
+  await expect(page.getByText(/Steps: hourly to 12 Nov 18:00, then 3-hourly/)).toBeVisible();
+
+  const optionTexts = async (label: string) => {
+    await page.getByRole('combobox', { name: label }).click();
+    const texts = await page.getByRole('option').allTextContents();
+    await page.keyboard.press('Escape');
+    return texts;
+  };
+  expect(await optionTexts('Start time')).toHaveLength(24);
+  await page.getByRole('combobox', { name: 'Start date' }).click();
+  await page.getByRole('option', { name: '2026-11-16' }).click();
+  expect(await optionTexts('Start time')).toEqual(['00:00', '06:00', '12:00', '18:00']);
+  await expect(page.getByLabel('Start time')).toHaveValue('00:00');
+  // the end cannot be before the start
+  await expect(page.getByLabel('End date')).toHaveValue('2026-11-16');
+  expect((await optionTexts('End date'))[0]).toBe('2026-11-16');
+
+  await page.getByRole('button', { name: 'corridor', exact: true }).click();
+  await expect(page.getByLabel('End date')).toHaveValue('2026-11-16');
 });

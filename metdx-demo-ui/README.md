@@ -55,8 +55,10 @@ Switch with `recordsSource` in `config.json` or `?records=catalogue|local` (see 
 ## Tests
 
 ```sh
-npm test                      # vitest (unit + component tests), non-watch
+npm test                      # vitest (unit + component tests), non-watch; the large EDR page tests are split over
+                              # src/pages/edr/index*.test.tsx (shared harness: test/edrPageHarness.tsx) so they run in parallel
 npm --prefix server ci && npm --prefix server test   # proxy server tests (node:test)
+node --test scripts/e2e-fingerprint.test.mjs         # e2e build fingerprint tests (node:test)
 ```
 
 ## End-to-end tests
@@ -65,9 +67,27 @@ Playwright runs against a production build served by `vite preview`, in mock mod
 
 ```sh
 npx playwright install chromium   # once
-npm run e2e           # mock-ol project against the default build (OpenLayers only)
-npm run e2e:leaflet   # both engines against a separate Leaflet-enabled build (dist-leaflet, preview port 4174)
+npm run e2e           # quick smoke set (tests tagged @quick, mock-ol, ~20 s): the main journeys + default-build engine checks
+npm run e2e:full      # everything in mock-ol (adds the 40k-point performance run, screenshot tests, datetime dropdowns, ...)
+npm run e2e:leaflet   # both engines, everything, against a separate Leaflet-enabled build (dist-leaflet, preview port 4174)
+npm run e2e:live      # real ECMWF/DestinE requests (opt-in)
 ```
+
+- **Quick set**: tests tagged `@quick` (`QUICK` in `test/e2e/engine.ts`): search -> record -> EDR point fetch with chart,
+  area contours drawn + toggle to points, free polygon draw, OGC Maps overlay, no Leaflet code / "Code on GitHub" link in
+  the default build. Tag a test with `test('...', { tag: QUICK }, async ...)` to add it. CI runs only `npm test`.
+- **No network**: basemap tiles (`tile.openstreetmap.org`) are answered with one local 256x256 PNG
+  (`test/fixtures/basemap-tile.png`, made by `scripts/make-stub-tile.mjs`; routed in `test/e2e/engine.ts`). The
+  "with the basemap" screenshots therefore show this flat stub tile, not real map imagery. A build with another
+  `VITE_BASEMAP_URL` needs its host added to that route.
+- **Build reuse**: the web server (`scripts/e2e-server.mjs`) rebuilds `dist/` only when the build fingerprint in
+  `dist/.e2e-build.json` differs: a hash of path/size/mtime of every build input (`src/` without tests, `public/`,
+  `test/fixtures/` (bundled by `mockFetch.ts`), `index.html`, vite/ts/package config, `.env*`), the `VITE_*` variables and
+  the scripts' own source (so new/deleted/renamed files count too). Also rebuilt when the stamp is missing, when
+  `dist/index.html` is newer than the stamp (e.g. a `build:pages` into the same dir), or with `E2E_REBUILD=1`. Playwright
+  never attaches to an already running server (`reuseExistingServer: false`); it serves the build with `vite preview` in the same
+  process, so stopping the run leaves nothing listening on port 4173. Run a single file with
+  `npx playwright test test/e2e/app.spec.ts --project=mock-ol`.
 
 ## Docker
 

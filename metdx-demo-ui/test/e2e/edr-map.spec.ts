@@ -1,7 +1,7 @@
 // EDR results on the map (mock project): the live ECMWF samples served by mockFetch (`?mock=1`) for position, area
 // and trajectory (on both map engines, see engine.ts); param/time switching, clearing and a 40k-point performance run on routed synthetic CoverageJSON.
 import type { Page } from '@playwright/test';
-import { dataPixels as scanPixels, expect, findDataPixel as findPixel, shotName, test, type EngineName } from './engine';
+import { dataPixels as scanPixels, expect, QUICK, findDataPixel as findPixel, settleMap, shotName, test, type EngineName } from './engine';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -269,7 +269,7 @@ test.describe('mock fixtures', () => {
     await expect(page.getByRole('dialog').getByTestId('result-json')).toContainText('"type": "Coverage');
   });
 
-  test('area: filled contours by default (stepped legend), click reads the nearest point, toggle to points and back', async ({ page }) => {
+  test('area: filled contours by default (stepped legend), click reads the nearest point, toggle to points and back', { tag: QUICK }, async ({ page }) => {
     await blockTiles(page);
     await openEdrMock(page, 'area');
     await drawGeometry(page, 'area');
@@ -326,9 +326,7 @@ test.describe('mock fixtures', () => {
     await expect(page.getByTestId('edr-result').getByTestId('legend')).toBeVisible();
     await expectDrawn(page);
     await clickDataPoint(page);
-    await page.mouse.move(0, 0);
-    await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
-    await page.waitForTimeout(800);
+    await settleMap(page);
     await page.screenshot({ path: `${SCREENS}/${shotName('edr-map-area', ENGINE)}.png` });
   });
 
@@ -359,9 +357,7 @@ test.describe('mock fixtures', () => {
     await page.getByRole('button', { name: 'Fetch' }).click();
     await expect(page.getByTestId('edr-result').getByTestId('legend')).toBeVisible();
     await expectDrawn(page);
-    await page.mouse.move(0, 0);
-    await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
-    await page.waitForTimeout(800);
+    await settleMap(page);
     await page.screenshot({ path: `${SCREENS}/${shotName('edr-map-trajectory', ENGINE)}.png` });
   });
 
@@ -372,9 +368,7 @@ test.describe('mock fixtures', () => {
     await page.getByRole('button', { name: 'Fetch' }).click();
     await expect(page.getByTestId('edr-result').locator('svg').first()).toBeVisible();
     await expectDrawn(page);
-    await page.mouse.move(0, 0);
-    await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
-    await page.waitForTimeout(800);
+    await settleMap(page);
     await page.screenshot({ path: `${SCREENS}/${shotName('edr-map-position', ENGINE)}.png` });
   });
 
@@ -504,7 +498,7 @@ async function pickParam(page: Page, key: string) {
 }
 
 test.describe('area polygon and opacity (mock fixtures)', () => {
-  test('area as a free polygon: clicks + double-click give a closed, non-rectangular POLYGON in the request URL', async ({ page }) => {
+  test('area as a free polygon: clicks + double-click give a closed, non-rectangular POLYGON in the request URL', { tag: QUICK }, async ({ page }) => {
     await blockTiles(page);
     await openEdrMock(page, 'area');
     await page.getByTestId('edr-area-shape').getByRole('button', { name: 'polygon', exact: true }).click();
