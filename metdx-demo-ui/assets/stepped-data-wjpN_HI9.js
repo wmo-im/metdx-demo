@@ -1,0 +1,1 @@
+const t=[{id:"2026-11-09T00:00:00Z",title:"2026-11-09T00:00:00Z"},{id:"2026-11-10T00:00:00Z",title:"2026-11-10T00:00:00Z"}],e=[{href:"https://polytope-edr.lumi.apps.dte.destination-earth.eu/collections/stepped-data/instances",rel:"self",type:"application/json"}],s={instances:t,links:e};export{s as default,t as instances,e as links};
