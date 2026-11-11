@@ -353,7 +353,7 @@ chunk      init_time       lead_h  url                                          
     - _Behind this: ERA5 is stored as analysis-ready, cloud-optimised (ARCO) Zarr, organised for fast reads, so a decade at a single point comes back in seconds._
     - A short explainer for the data pipeline:
 
-    **==TODO==** _Stack-diagram for the ERA5 pipeline (ERA5 → ARCO Zarr → Polytope EDR on DestinE → CoverageJSON): ask ECMWF (@awarde96) for a description like the Canadian VOF one._
+    ![ERA5 ARCO pipeline: from the Copernicus archive to OGC API – EDR](images/era5-arco-edr-pipeline.png)
 
 15. **EDR:**
     - Open the EDR query builder. This time the query types are "POSITION", "AREA" and "CUBE": this endpoint's `data_queries` offers three of the six you saw for the ECMWF forecast. Same UI, different metadata.
