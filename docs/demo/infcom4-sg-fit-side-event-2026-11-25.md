@@ -318,7 +318,7 @@ chunk      init_time       lead_h  url                                          
 5. The `collection` resource is JSON metadata. Click on the "OGC EDR" (`collection`) link to load it (target: https://polytope-edr.lumi.apps.dte.destination-earth.eu/collections/operational-data?f=json). It's a standard-compliant JSON document meant for machines not humans. It contains all the metadata needed for the Web UI to build a meaningful query interface for a user - everything is driven by the metadata. As an example, search in the JSON for `data_queries` - this shows the query types that the EDR end-point supports.
 6. A short explainer for the data pipeline - from source to OGC API endpoint
 
-   **==TODO==** _Stack-diagram for the Polytope EDR pipeline (IFS → … → OGC API – EDR): ask ECMWF (@awarde96) for a description like the Canadian VOF one._
+   ![ECMWF Polytope EDR pipeline: from the Fields DataBase to OGC API – EDR](images/ecmwf-polytope-edr-pipeline.png)
 
 7. **EDR:** open the EDR query builder:
    - You'll see the available parameters - let's pick `2t` (2m temperature)
@@ -353,7 +353,7 @@ chunk      init_time       lead_h  url                                          
     - _Behind this: ERA5 is stored as analysis-ready, cloud-optimised (ARCO) Zarr, organised for fast reads, so a decade at a single point comes back in seconds._
     - A short explainer for the data pipeline:
 
-    **==TODO==** _Stack-diagram for the ERA5 pipeline (ERA5 → ARCO Zarr → Polytope EDR on DestinE → CoverageJSON): ask ECMWF (@awarde96) for a description like the Canadian VOF one. Probably one request covering both this and the point 6 diagram._
+    **==TODO==** _Stack-diagram for the ERA5 pipeline (ERA5 → ARCO Zarr → Polytope EDR on DestinE → CoverageJSON): ask ECMWF (@awarde96) for a description like the Canadian VOF one._
 
 15. **EDR:**
     - Open the EDR query builder. This time the query types are "POSITION", "AREA" and "CUBE": this endpoint's `data_queries` offers three of the six you saw for the ECMWF forecast. Same UI, different metadata.
