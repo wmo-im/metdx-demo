@@ -350,7 +350,7 @@ chunk      init_time       lead_h  url                                          
     - Click "Draw position", then add a point on the map (e.g., Toronto), select "AirTemp (Air Temperature) \[celsius\]" from the parameter list, and click "Fetch" _(we leave the "Datetime" selector with default values to select the complete time-range)_
     - The Web UI zooms in on the selected point and shows the time-series chart in the left-hand panel _(use the time-slider to see the dot on the map change colour)_
 14. What about a larger dataset? Head back to the catalogue search page and select the "ERA5 hourly reanalysis on single levels, served from cloud-optimised Zarr" dataset: a global dataset with data from 1940 to the present (about a week behind real time)
-    - _Behind this: ERA5 is stored as analysis-ready, cloud-optimised (ARCO) Zarr, organised for fast reads, so a decade at a single point comes back in seconds._
+    - _Behind this: ERA5 is stored as analysis-ready, cloud-optimised (ARCO) Zarr, in two copies: one chunked for time series at a point, one for whole maps. A position query reads the time-series copy, so a decade at a single point comes back in seconds._
     - A short explainer for the data pipeline:
 
     ![ERA5 ARCO pipeline: from the Copernicus archive to OGC API – EDR](images/era5-arco-edr-pipeline.png)
