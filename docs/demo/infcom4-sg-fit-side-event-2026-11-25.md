@@ -328,14 +328,14 @@ chunk      init_time       lead_h  url                                          
    - The Web UI builds the EDR query and displays it at the bottom of the page 
    - Click "Open in browser" (↗) to open the query URL in a new tab - it's more JSON (CoverageJSON), again, designed for machines not humans
    - Back in the Web UI click "Fetch" to illustrate how machines can make data interpretable to humans - the Web UI zooms in on the point and displays a time-series chart in the left-hand panel; if you move the time-slider, the dot on the map changes colour according to the temperature scale.
-9. Now - let's do an area query:
-   - To reduce the amount of data we're asking for, narrow the "Datetime" window to 12 hours
+9. Now - let's do an area query - select "AREA" query type:
    - Zoom out to the European area
-   - Select query type "AREA", then "RECTANGLE", then "Draw area" - draw the bounding box on the map _(don't select too large an area - this test service is limited in the amount of data it will return in a single query)_
+   - Select "RECTANGLE", then "Draw area" - draw the bounding box on the map _(don't select too large an area - this test service is limited in the amount of data it will return in a single query)_
+   - In the "Datetime" section, select "RANGE" - we want data for several steps
+   - To reduce the amount of data we're asking for, narrow the "Datetime" window to 6 hours
    - Again, you see the EDR query URL that's been built
    - Click "Fetch" _(this can take a while depending on the time duration and bounding box size)_ - the Web UI zooms into the requested area and plots the data on the map ("CONTOURS" or "POINTS" for different plotting styles)
-   - **==TODO==** _check if there is a time-slide widget when multiple timesteps of data are retrieved (doesn't seem so yet)_
-   - _(you can draw an area with a polygon if you select "POLYGON" in the Web UI)_
+   - Use the time-slider to step through the hourly data steps
 10. **Maps:** _(time allowing)_ open the Maps view: a rendered forecast map, no data handling at all.
 11. Now head back to the main catalogue search page and select the "Canadian weather forecast \[experimental\]" dataset
     - A short explainer for the data pipeline:
