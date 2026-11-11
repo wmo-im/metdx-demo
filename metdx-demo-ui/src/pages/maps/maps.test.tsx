@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { MapController } from '../../shell/mapController';
@@ -195,5 +195,105 @@ describe('MapsPage', () => {
       </MemoryRouter>,
     );
     expect(screen.getByText(/No collection selected/)).toBeInTheDocument();
+  });
+});
+
+describe('MapsPage: Date and Time dropdowns', () => {
+  const SCHEMA_URL = 'https://polytope-edr.lumi.apps.dte.destination-earth.eu/collections/operational_map_server/schema?f=json';
+  const props = { '2t': { type: 'number' } };
+
+  /** Serve this schema (server format: space + +00:00) in place of the fixture one. */
+  function withSchema(datetime: string[] | null, instances: string[] = []) {
+    const properties: Record<string, unknown> = { ...props };
+    if (datetime) properties.datetime = { type: 'string', enum: datetime };
+    if (instances.length) properties.instance_id = { type: 'string', enum: instances };
+    setFetchImpl((input, init) =>
+      unproxyUrl(input) === SCHEMA_URL
+        ? Promise.resolve(new Response(JSON.stringify({ properties }), { headers: { 'content-type': 'application/json' } }))
+        : mock(input, init),
+    );
+  }
+  const SERVER_TIMES = [
+    '2020-01-01 00:00:00+00:00',
+    '2020-01-01 06:00:00+00:00',
+    '2020-01-02 00:00:00+00:00',
+    '2020-01-02 03:00:00+00:00',
+    '2020-01-02 06:00:00+00:00',
+    '2020-01-03 00:00:00+00:00',
+    '2020-01-03 06:00:00+00:00',
+  ];
+  const INSTANCES = ['2020-01-01T00:00:00+00:00', '2020-01-02T00:00:00+00:00'];
+
+  const optionsOf = async (user: ReturnType<typeof userEvent.setup>, label: string) => {
+    await user.click(screen.getByRole('combobox', { name: label }));
+    const opts = within(await screen.findByRole('listbox')).getAllByRole('option').map((o) => o.textContent);
+    await user.keyboard('{Escape}');
+    return opts;
+  };
+  const choose = async (user: ReturnType<typeof userEvent.setup>, label: string, option: string) => {
+    await user.click(screen.getByRole('combobox', { name: label }));
+    await user.click(await screen.findByRole('option', { name: option }));
+  };
+  const ready = () => waitFor(() => expect(urlBox().value).toContain('parameter-name=2t'));
+
+  it('defaults to the first time of the latest run; Date lists dates, Time the times of that date', async () => {
+    const user = userEvent.setup({ delay: null });
+    withSchema(SERVER_TIMES, INSTANCES);
+    setup();
+    await ready();
+    expect(urlBox().value).toContain('datetime=2020-01-02T00:00:00Z&');
+    expect(screen.queryByRole('combobox', { name: 'Forecast time' })).toBeNull();
+    expect(screen.queryByLabelText('Datetime')).toBeNull();
+    expect(screen.getByRole('combobox', { name: 'Date' })).toHaveValue('2020-01-02');
+    expect(screen.getByRole('combobox', { name: 'Time' })).toHaveValue('00:00');
+    expect(await optionsOf(user, 'Date')).toEqual(['2020-01-02', '2020-01-03']); // nothing before the run
+    expect(await optionsOf(user, 'Time')).toEqual(['00:00', '03:00', '06:00']);
+    await choose(user, 'Time', '03:00');
+    expect(urlBox().value).toContain('datetime=2020-01-02T03:00:00Z&');
+    await choose(user, 'Date', '2020-01-03');
+    expect(await optionsOf(user, 'Time')).toEqual(['00:00', '06:00']);
+  });
+
+  it('keeps the time when the new date offers it, else takes its first time', async () => {
+    const user = userEvent.setup({ delay: null });
+    withSchema(SERVER_TIMES, INSTANCES);
+    setup();
+    await ready();
+    await choose(user, 'Time', '06:00');
+    await choose(user, 'Date', '2020-01-03');
+    expect(urlBox().value).toContain('datetime=2020-01-03T06:00:00Z&');
+    expect(screen.getByRole('combobox', { name: 'Time' })).toHaveValue('06:00');
+    await choose(user, 'Date', '2020-01-02');
+    await choose(user, 'Time', '03:00');
+    await choose(user, 'Date', '2020-01-03'); // no 03:00 on the 3rd
+    expect(urlBox().value).toContain('datetime=2020-01-03T00:00:00Z&');
+    expect(screen.getByRole('combobox', { name: 'Time' })).toHaveValue('00:00');
+  });
+
+  it('only offers times at or after the selected run, and resets to its first time', async () => {
+    const user = userEvent.setup({ delay: null });
+    withSchema(SERVER_TIMES, INSTANCES);
+    setup();
+    await ready();
+    await user.click(screen.getByLabelText('Instance (run date)'));
+    await user.click(await screen.findByRole('option', { name: '2020-01-01T00:00:00Z' }));
+    expect(urlBox().value).toContain('datetime=2020-01-01T00:00:00Z&');
+    expect(await optionsOf(user, 'Date')).toEqual(['2020-01-01', '2020-01-02', '2020-01-03']);
+    expect(await optionsOf(user, 'Time')).toEqual(['00:00', '06:00']);
+  });
+
+  it('without schema datetimes: a free-text Datetime field, empty by default', async () => {
+    const user = userEvent.setup({ delay: null });
+    withSchema(null);
+    setup();
+    await ready();
+    expect(screen.queryByRole('combobox', { name: 'Date' })).toBeNull();
+    expect(screen.queryByRole('combobox', { name: 'Time' })).toBeNull();
+    const field = screen.getByLabelText('Datetime') as HTMLInputElement;
+    expect(field.value).toBe('');
+    // The URL builder never omits the datetime (an empty one makes the server answer 500): it uses today 00:00Z.
+    expect(urlBox().value).toMatch(/datetime=\d{4}-\d{2}-\d{2}T00:00:00Z&/);
+    await user.type(field, '2020-05-06T12:00:00Z');
+    expect(urlBox().value).toContain('datetime=2020-05-06T12:00:00Z&');
   });
 });

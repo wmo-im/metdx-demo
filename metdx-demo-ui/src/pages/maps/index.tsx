@@ -37,11 +37,13 @@ import {
   formatBbox,
   parseBbox,
   parseSchema,
+  pickDatetime,
   resolveMapUrl,
   schemaUrl,
-  todayAtMidnight,
   type MapSchema,
 } from '../../lib/maps';
+import { availableDates, splitIso, timesOnDate } from '../../lib/edr';
+import { PickField } from '../../shell/PickField';
 
 type Status = { severity: 'info' | 'success' | 'error' | 'warning'; text: string } | null;
 
@@ -84,7 +86,7 @@ export default function MapsPage() {
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const [height, setHeight] = useState(DEFAULT_HEIGHT);
   const [instance, setInstance] = useState('');
-  const [datetime, setDatetime] = useState(todayAtMidnight());
+  const [datetime, setDatetime] = useState('');
   const [parameter, setParameter] = useState('');
   const [level, setLevel] = useState('');
 
@@ -168,7 +170,11 @@ export default function MapsPage() {
   }, [map, setBusy]);
 
   /* ------------------------------------------------------------- request URL */
+  // The times at or after the selected run, as Date + Time dropdowns (the time list follows the date).
   const datetimeOptions = useMemo(() => filterDatetimes(schema.datetimes, instance || undefined), [schema, instance]);
+  const dateOptions = useMemo(() => availableDates(datetimeOptions), [datetimeOptions]);
+  const selected = datetimeOptions.includes(datetime) ? splitIso(datetime) : { date: '', time: '' };
+  const timeOptions = useMemo(() => timesOnDate(datetimeOptions, selected.date), [datetimeOptions, selected.date]);
 
   const requestUrl = useMemo(
     () =>
@@ -197,7 +203,17 @@ export default function MapsPage() {
   const onInstance = (value: string) => {
     setInstance(value);
     const dts = filterDatetimes(schema.datetimes, value);
-    if (dts.length) setDatetime(dts[0]);
+    setDatetime(dts[0] ?? '');
+  };
+
+  /** A new date keeps the time when that date offers it, else takes its first time. */
+  const onDate = (date: string) => {
+    const dt = pickDatetime(datetimeOptions, date, selected.time);
+    if (dt) setDatetime(dt);
+  };
+  const onTime = (time: string) => {
+    const dt = pickDatetime(datetimeOptions, selected.date, time);
+    if (dt) setDatetime(dt);
   };
 
   const drawBbox = useCallback(async () => {
@@ -339,29 +355,21 @@ export default function MapsPage() {
           </TextField>
         )}
 
-        {datetimeOptions.length > 0 && (
+        {schema.datetimes.length > 0 ? (
+          <Stack direction="row" spacing={1}>
+            <PickField label="Date" value={selected.date} options={dateOptions} onChange={onDate} flex={2} />
+            <PickField label="Time" value={selected.time} options={timeOptions} onChange={onTime} flex={1} />
+          </Stack>
+        ) : (
           <TextField
-            select
             size="small"
-            label="Forecast time"
-            value={datetimeOptions.includes(datetime) ? datetime : ''}
+            label="Datetime"
+            placeholder="e.g. 2026-04-30T00:00:00Z"
+            helperText="This collection does not list its times; empty = today at 00:00Z."
+            value={datetime}
             onChange={(e) => setDatetime(e.target.value)}
-          >
-            {datetimeOptions.map((v) => (
-              <MenuItem key={v} value={v}>
-                {v}
-              </MenuItem>
-            ))}
-          </TextField>
+          />
         )}
-
-        <TextField
-          size="small"
-          label="Datetime"
-          placeholder="e.g. 2026-04-30T00:00:00Z"
-          value={datetime}
-          onChange={(e) => setDatetime(e.target.value)}
-        />
 
         {schema.parameters.length > 0 && (
           <TextField select size="small" label="Parameter" value={parameter} onChange={(e) => setParameter(e.target.value)}>

@@ -2,7 +2,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Alert,
-  Autocomplete,
   Box,
   Button,
   Chip,
@@ -84,6 +83,7 @@ import {
   type TemporalExtent,
 } from '../../lib/edr';
 import type { Position } from '../../lib/types';
+import { PickField } from '../../shell/PickField';
 import { ResultPanel, type FetchedResult } from './ResultPanel';
 
 type Status = { severity: 'error' | 'info' | 'success' | 'warning'; text: string } | null;
@@ -157,39 +157,11 @@ function Section({ title, children, action }: { title: string; children: ReactNo
   );
 }
 
-/** A typeable dropdown of the offered values (an `Autocomplete`: typing filters the list). */
 /** The instants >= `startIso` (compared as times: `…:30.5Z` sorts before `…:30Z` as text). */
 const fromStart = (times: string[], startIso: string): string[] => {
   const s = Date.parse(startIso);
   return Number.isNaN(s) ? times : times.filter((t) => Date.parse(t) >= s);
 };
-
-function PickField({
-  label,
-  value,
-  options,
-  onChange,
-  flex,
-}: {
-  label: string;
-  value: string;
-  options: string[];
-  onChange: (v: string) => void;
-  flex: number;
-}) {
-  return (
-    <Autocomplete
-      size="small"
-      options={options}
-      value={options.includes(value) ? value : null}
-      onChange={(_, v) => v && onChange(v)}
-      autoHighlight
-      noOptionsText="No such time available"
-      renderInput={(p) => <TextField {...p} label={label} />}
-      sx={{ flex }}
-    />
-  );
-}
 
 function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
   const { id: recordId } = useParams();

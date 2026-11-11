@@ -12,6 +12,7 @@ import {
   filterDatetimes,
   parseBbox,
   parseSchema,
+  pickDatetime,
   resolveMapUrl,
   schemaUrl,
 } from './maps';
@@ -53,6 +54,19 @@ describe('buildMapUrl (Flet format)', () => {
       `${MAP}?f=png&datetime=2026-01-01T06:00:00Z`,
     );
     expect(buildMapUrl({ mapUrl: MAP })).toMatch(/\?f=png&datetime=\d{4}-\d{2}-\d{2}T00:00:00Z$/);
+  });
+});
+
+describe('pickDatetime', () => {
+  const opts = ['2026-11-10T00:00:00Z', '2026-11-10T01:00:00Z', '2026-11-11T00:00:00Z', '2026-11-11T06:00:00Z', '2026-11-12T06:00:30Z'];
+  it('keeps the time when the date offers it, else the first of the date', () => {
+    expect(pickDatetime(opts, '2026-11-11', '06:00')).toBe('2026-11-11T06:00:00Z');
+    expect(pickDatetime(opts, '2026-11-11', '01:00')).toBe('2026-11-11T00:00:00Z');
+    expect(pickDatetime(opts, '2026-11-12', '06:00:30')).toBe('2026-11-12T06:00:30Z');
+    expect(pickDatetime(opts, '2026-11-10')).toBe('2026-11-10T00:00:00Z');
+  });
+  it('is undefined for a date without times', () => {
+    expect(pickDatetime(opts, '2026-11-13', '00:00')).toBeUndefined();
   });
 });
 

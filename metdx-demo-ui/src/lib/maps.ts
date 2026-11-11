@@ -4,6 +4,7 @@
  * `build_url`): `{map}?f=png&bbox=..&width=..&height=..&datetime=..&parameter-name=..&subset=z(..)`.
  * Values are emitted verbatim (not percent-encoded), exactly like Flet.
  */
+import { splitIso } from './edr';
 import type { BBox, Geometry } from './types';
 
 export const OGC_MAP_REL = 'http://www.opengis.net/def/rel/ogc/1.0/map';
@@ -56,6 +57,15 @@ export function filterDatetimes(datetimes: string[], instance: string | undefine
   if (!instance || !datetimes.length) return datetimes;
   const inst = cleanDt(instance);
   return datetimes.filter((dt) => dt >= inst);
+}
+
+/**
+ * The offered datetime on `date` (`YYYY-MM-DD`) to select: the one at `time` (as `timesOnDate` labels it) when
+ * there is one, else the first of that date; `undefined` when the date has none.
+ */
+export function pickDatetime(options: string[], date: string, time?: string | null): string | undefined {
+  const onDate = options.filter((t) => t.startsWith(`${date}T`));
+  return onDate.find((t) => splitIso(t).time === time) ?? onDate[0];
 }
 
 /** Fallback datetime so a request never goes out without one (the server 500s). */
