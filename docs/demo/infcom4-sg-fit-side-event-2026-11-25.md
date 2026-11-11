@@ -304,8 +304,6 @@ chunk      init_time       lead_h  url                                          
        - Next, the notebook calculates the sun position, clear-sky sunlight amounts, accumulations over time, solar panel outputs, daily totals. 
        - The notebook finishes by estimating how much power a battery would charge, recommends when to run heavy appliances, and generates some charts.
 
-==TODO Adam will send more notebooks==  
-  
 ![ecmwf-virtual-cube-architecture.png](images/47B626F6-A626-4526-9F6C-D6880BBB956C.png)  
 ![ecmwf-virtual-cube-architecture-workflow.png](images/C9876A37-EAFA-45A1-B155-77E19C365C2D.png)  
   
