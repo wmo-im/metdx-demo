@@ -1,8 +1,10 @@
 // Sidebar "Result" panel of the EDR page: draws a fetched CoverageJSON on the map and offers the pickers,
 // legend, clicked-point readout and (multi-time) series chart for it.
-import { useEffect, useMemo, useState } from 'react';
-import { Alert, Box, Button, MenuItem, Slider, Stack, TextField, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { Alert, Box, Button, IconButton, MenuItem, Slider, Stack, TextField, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material';
 import DataObjectIcon from '@mui/icons-material/DataObject';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import PauseIcon from '@mui/icons-material/Pause';
 import { useMap, useMapEngine } from '../../shell';
 import { Legend } from '../../shell/Legend';
 import { CovJsonError, parseCoverageJson, pointSeries, type CovJsonLayer } from '../../lib/covjson';
@@ -21,6 +23,17 @@ export interface FetchedResult {
 }
 
 const MAX_CHARTS = 8;
+/** Play speed: one time step every 500 ms (about 2 steps/s). */
+const PLAY_INTERVAL_MS = 500;
+
+/** Slider marks, one per step; the first and last carry the time (as `MM-DD HH:mm` for an ISO instant). */
+function timeMarks(times: string[]): { value: number; label?: string }[] {
+  const short = (t: string) => {
+    const m = /^\d{4}-(\d{2})-(\d{2})[T ](\d{2}:\d{2})/.exec(t);
+    return m ? `${m[1]}-${m[2]} ${m[3]}` : t;
+  };
+  return times.map((t, i) => (i === 0 || i === times.length - 1 ? { value: i, label: short(t) } : { value: i }));
+}
 /** Query types whose MultiPoint result is shown as filled contours by default. */
 const CONTOUR_MODES = ['area', 'radius', 'cube'];
 
@@ -70,12 +83,53 @@ export function ResultPanel({ result, mode, onViewJson }: Props) {
   const layer = parsed.layer;
 
   const [paramKey, setParamKey] = useState('');
+  // The slider position (`timeIndex`) follows the pointer / keys at once; the map is told through `drawIndex`, which is
+  // updated at most once per animation frame while dragging (see `goTo`).
   const [timeIndex, setTimeIndex] = useState(0);
+  const [drawIndex, setDrawIndex] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const frame = useRef<{ raf: number; pending: number | null }>({ raf: 0, pending: null });
   const [selected, setSelected] = useState<{ index: number; lonlat: [number, number] } | null>(null);
 
   const param = layer ? (layer.parameters.find((p) => p.key === paramKey) ?? layer.parameters[0]) : undefined;
   const nTimes = layer ? Math.max(1, layer.times.length) : 1;
-  const ti = Math.min(timeIndex, nTimes - 1);
+  const uiTi = Math.min(timeIndex, nTimes - 1);
+  const ti = Math.min(drawIndex, nTimes - 1);
+
+  const goTo = useCallback((i: number) => {
+    setTimeIndex(i);
+    const f = frame.current;
+    if (f.raf) {
+      f.pending = i; // a redraw is already scheduled for this frame: keep only the latest position
+      return;
+    }
+    setDrawIndex(i);
+    f.raf = requestAnimationFrame(() => {
+      f.raf = 0;
+      if (f.pending !== null) {
+        const p = f.pending;
+        f.pending = null;
+        setDrawIndex(p);
+      }
+    });
+  }, []);
+  useEffect(
+    () => () => {
+      cancelAnimationFrame(frame.current.raf);
+      frame.current = { raf: 0, pending: null };
+    },
+    [],
+  );
+
+  // Play: one step every PLAY_INTERVAL_MS, looping; the next step is only scheduled once the current one is shown.
+  useEffect(() => {
+    if (!playing || nTimes < 2) return;
+    const id = setTimeout(() => goTo((uiTi + 1) % nTimes), PLAY_INTERVAL_MS);
+    return () => clearTimeout(id);
+  }, [playing, uiTi, nTimes, goTo]);
+  useEffect(() => {
+    if (nTimes < 2) setPlaying(false);
+  }, [nTimes]);
 
   // Scattered points (area / radius / cube) default to filled contours; position / trajectory / corridor to points.
   const support = useMemo(() => (layer && layer.kind === 'points' ? contourSupport(layer.coords as Float64Array) : null), [layer]);
@@ -115,6 +169,14 @@ export function ResultPanel({ result, mode, onViewJson }: Props) {
     });
   }, [map, layer, param, ti, style, opacityChoice, useCoverage]);
 
+  // When idle, precompute the contours of the two next and two previous steps (cancelled by the cleanup as soon as the
+  // result, parameter, style or step changes, and by the map when the data is cleared).
+  useEffect(() => {
+    if (!layer || !param || useCoverage || style !== 'contours' || nTimes < 2) return;
+    const near = [ti + 1, ti - 1, ti + 2, ti - 2].filter((i) => i >= 0 && i < nTimes);
+    return map.prefetchData?.(layer, { param: param.key, timeIndices: near, style });
+  }, [map, layer, param, ti, style, useCoverage, nTimes]);
+
   // A replaced layer (other level) invalidates a selection only if it no longer fits.
   useEffect(() => {
     if (!layer) return;
@@ -147,6 +209,14 @@ export function ResultPanel({ result, mode, onViewJson }: Props) {
     () => (layer && param && selected && mode !== 'position' ? seriesOf(layer, selected.index, param.key) : null),
     [layer, param, selected, mode],
   );
+
+  const onTimeKeyDown = (e: KeyboardEvent<HTMLElement>) => {
+    // Arrows / Home / End / Page keys are the slider's own; Space on the slider toggles play (on the button it clicks).
+    if (e.key === ' ' && (e.target as HTMLElement).tagName === 'INPUT') {
+      e.preventDefault();
+      setPlaying((p) => !p);
+    }
+  };
 
   return (
     <Box sx={{ mt: 2 }} data-testid="edr-result">
@@ -185,19 +255,40 @@ export function ResultPanel({ result, mode, onViewJson }: Props) {
               </TextField>
             )}
             {layer.times.length > 1 && (
-              <Box sx={{ px: 1 }}>
-                <Typography variant="caption" color="text.secondary" data-testid="edr-time-label">
-                  Time: {layer.times[ti]}
-                </Typography>
-                <Slider
-                  size="small"
-                  aria-label="Time"
-                  min={0}
-                  max={layer.times.length - 1}
-                  step={1}
-                  value={ti}
-                  onChange={(_, v) => setTimeIndex(v as number)}
-                />
+              <Box sx={{ px: 1 }} onKeyDown={onTimeKeyDown} data-testid="edr-time">
+                <Stack direction="row" alignItems="center" spacing={0.5}>
+                  <IconButton
+                    size="small"
+                    aria-label={playing ? 'Pause' : 'Play'}
+                    data-testid="edr-time-play"
+                    onClick={() => setPlaying((p) => !p)}
+                  >
+                    {playing ? <PauseIcon fontSize="small" /> : <PlayArrowIcon fontSize="small" />}
+                  </IconButton>
+                  <Typography variant="caption" color="text.secondary" data-testid="edr-time-label">
+                    Time: {layer.times[uiTi]}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto !important' }} data-testid="edr-time-step">
+                    Step {uiTi + 1}/{layer.times.length}
+                  </Typography>
+                </Stack>
+                <Box sx={{ px: 2 }}>
+                  <Slider
+                    size="small"
+                    aria-label="Time"
+                    min={0}
+                    max={layer.times.length - 1}
+                    step={1}
+                    marks={timeMarks(layer.times)}
+                    value={uiTi}
+                    valueLabelDisplay="off"
+                    getAriaValueText={(v) => layer.times[v] ?? String(v)}
+                    onChange={(_, v) => {
+                      setPlaying(false);
+                      goTo(v as number);
+                    }}
+                  />
+                </Box>
               </Box>
             )}
             {canCoverage && (

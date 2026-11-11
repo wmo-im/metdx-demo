@@ -359,6 +359,100 @@ function extract(part: Part, p: { raw: unknown[]; dims: Dim[] }, grid: boolean, 
   }
 }
 
+/** How a collection of per-time coverages over one point set is merged into a single layer with N times. */
+interface TimeMerge {
+  /** Indices into the coverages of the ones kept, sorted by time (first coverage wins per duplicate time). */
+  order: number[];
+  /** Times of the kept coverages, same order. */
+  times: string[];
+}
+
+const sameValues = (a: readonly unknown[], b: readonly unknown[]): boolean => {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+};
+
+/** Valid time of each coverage: its `t` value, or (when all `t` are equal, as polytope does) forecast date + `step` hours. */
+function coverageTimes(covs: { cov: Json; axes: Partial<Record<Canon, Axis>> }[]): string[] {
+  const raw = covs.map((c) => normaliseTime(String(c.axes.t!.values[0])));
+  if (new Set(raw).size > 1) return raw;
+  const steps = covs.map((c) => c.cov['mars:metadata']?.step);
+  const base = Date.parse(raw[0]);
+  const stepsOk = steps.every((s) => typeof s === 'number' && Number.isFinite(s)); // repeated steps are fine: deduplicated later
+  const sameBase = covs.every((c) => {
+    const f = c.cov['mars:metadata']?.['Forecast date'];
+    return typeof f === 'string' && normaliseTime(f) === raw[0];
+  });
+  if (!stepsOk || !sameBase || !Number.isFinite(base)) return raw;
+  return steps.map((s) => new Date(base + (s as number) * 3_600_000).toISOString().replace('.000Z', 'Z'));
+}
+
+/**
+ * Detect a collection of coverages that share exactly one point domain and differ only in time (one `t` value each).
+ * The full ordered composite coordinate arrays and every other axis (e.g. a level) must be strictly equal; a length
+ * check only rejects early. Returns `undefined` when the coverages are not such a set (they are then concatenated).
+ */
+function detectTimeMerge(covs: { cov: Json; kind: Kind; axes: Partial<Record<Canon, Axis>> }[]): TimeMerge | undefined {
+  if (covs.length < 2) return undefined;
+  const a = covs[0];
+  const ac = a.axes.c;
+  if (!ac?.tuple || ac.length > MAX_POINTS) return undefined;
+  for (const c of covs) {
+    const cc = c.axes.c;
+    if (c.kind !== 'points' || !cc?.tuple || cc.length !== ac.length || c.axes.t?.length !== 1) return undefined;
+    if (!sameValues(cc.tuple, ac.tuple)) return undefined;
+    if (c.axes.c!.key !== ac.key || c.axes.t?.key !== a.axes.t!.key) return undefined;
+  }
+  // Every original non-time axis (also those readAxes drops, e.g. `ensemble`) must exist in all coverages and be equal.
+  const others = (c: { cov: Json; axes: Partial<Record<Canon, Axis>> }): Map<string, string> | undefined => {
+    const raw = c.cov.domain?.axes;
+    if (!raw || typeof raw !== 'object') return undefined;
+    const m = new Map<string, string>();
+    for (const [key, ax] of Object.entries<Json>(raw)) {
+      if (key === c.axes.t?.key || key === c.axes.c?.key) continue; // time is compared below, the composite point by point
+      try {
+        m.set(key, JSON.stringify(ax) ?? '');
+      } catch {
+        return undefined; // cannot be compared
+      }
+    }
+    return m;
+  };
+  const otherA = others(a);
+  if (!otherA) return undefined;
+  for (const c of covs.slice(1)) {
+    const o = others(c);
+    if (!o || o.size !== otherA.size) return undefined;
+    for (const [k, v] of otherA) if (o.get(k) !== v) return undefined;
+  }
+  for (const c of covs.slice(1)) {
+    const cv = c.axes.c!.values;
+    for (let i = 0; i < ac.length; i++) {
+      const p = ac.values[i];
+      const q = cv[i];
+      if (!Array.isArray(p) || !Array.isArray(q) || !sameValues(p, q)) return undefined;
+    }
+  }
+  const all = coverageTimes(covs);
+  const stamp = (t: string) => Date.parse(t);
+  const seen = new Set<number | string>();
+  const kept: { i: number; t: string }[] = [];
+  all.forEach((t, i) => {
+    const key = Number.isFinite(stamp(t)) ? stamp(t) : t;
+    if (seen.has(key)) return; // duplicate timestamp: the first coverage wins
+    seen.add(key);
+    kept.push({ i, t });
+  });
+  kept.sort((p, q) => {
+    const x = stamp(p.t);
+    const y = stamp(q.t);
+    if (Number.isFinite(x) && Number.isFinite(y)) return x - y;
+    return p.t < q.t ? -1 : p.t > q.t ? 1 : 0;
+  });
+  return { order: kept.map((k) => k.i), times: kept.map((k) => k.t) };
+}
+
 /**
  * Parse a CoverageJSON `Coverage` / `CoverageCollection` (standard or ECMWF-style) into a
  * {@link DataLayer}.
@@ -401,6 +495,7 @@ export function parseCoverageJson(json: unknown, options: ParseOptions = {}): Co
   const kind = covs[0].kind;
   if (covs.some((c) => c.kind !== kind)) throw new CovJsonError('Coverages of different domain types cannot be combined');
   if (kind === 'grid' && covs.length > 1) throw new CovJsonError('Collections of several grids are not supported');
+  const merge = kind === 'points' ? detectTimeMerge(covs) : undefined;
 
   // ---- Size checks (before any heavy work) ------------------------------------------------
   if (kind === 'grid') {
@@ -410,7 +505,7 @@ export function parseCoverageJson(json: unknown, options: ParseOptions = {}): Co
     if (cells > MAX_GRID_CELLS) throw new TooLargeToDraw('cells', cells, MAX_GRID_CELLS);
   } else {
     let total = 0;
-    for (const c of covs) {
+    for (const c of merge ? [covs[0]] : covs) {
       total += c.axes.c ? c.axes.c.length : 1;
       if (total > MAX_POINTS) throw new TooLargeToDraw('points', total, MAX_POINTS);
     }
@@ -434,7 +529,7 @@ export function parseCoverageJson(json: unknown, options: ParseOptions = {}): Co
   const first = covs[0];
   const separateT = first.axes.t?.values ?? [];
   const compositeHasT = kind === 'trajectory' && !!first.axes.c?.tuple?.includes('t');
-  const times: string[] = compositeHasT ? [] : separateT.map((t) => normaliseTime(String(t)));
+  const times: string[] = merge ? merge.times : compositeHasT ? [] : separateT.map((t) => normaliseTime(String(t)));
   const nTimes = Math.max(times.length, 1);
   const zAxis = first.axes.z;
   const levels = zAxis ? zAxis.values.map((v) => Number(v)) : [];
@@ -443,12 +538,14 @@ export function parseCoverageJson(json: unknown, options: ParseOptions = {}): Co
   // ---- Geometry and parts -----------------------------------------------------------------
   let coords: Float64Array | GridSpec;
   const parts: Part[] = [];
+  /** Merged time steps: one part per kept coverage, in time order (same point set). */
+  const mergedParts: Part[] = [];
   let total = 0;
 
   const makePart = (c: Cov, spatial: number, g: Pick<Part, 'nx' | 'ny' | 'flipX' | 'flipY' | 'xIndex'>): Part => {
     const compTimes = c.kind === 'trajectory' && !!c.axes.c?.tuple?.includes('t');
     const n = compTimes ? 1 : Math.max(c.axes.t?.length ?? 0, 1);
-    if (n !== nTimes) throw new CovJsonError('Coverages with different time axes cannot be combined');
+    if (n !== (merge ? 1 : nTimes)) throw new CovJsonError('Coverages with different time axes cannot be combined');
     const ranges = new Map<string, { raw: unknown[]; dims: Dim[] }>();
     const rs = (c.cov.ranges ?? {}) as Record<string, Json>;
     for (const key of rangeKeys) {
@@ -495,10 +592,11 @@ export function parseCoverageJson(json: unknown, options: ParseOptions = {}): Co
     parts.push(makePart(c, xv.length * yv.length, { nx: xv.length, ny: yv.length, flipX, flipY, xIndex }));
     total = xv.length * yv.length;
   } else {
-    for (const c of covs) total += c.axes.c ? c.axes.c.length : 1;
+    const geomCovs = merge ? [covs[0]] : covs; // merged: one shared point set
+    for (const c of geomCovs) total += c.axes.c ? c.axes.c.length : 1;
     const xy = new Float64Array(total * 2);
     let at = 0;
-    for (const c of covs) {
+    for (const c of geomCovs) {
       const comp = c.axes.c;
       let n = 1;
       if (comp) {
@@ -528,9 +626,10 @@ export function parseCoverageJson(json: unknown, options: ParseOptions = {}): Co
         xy[at * 2] = lon;
         xy[at * 2 + 1] = lat;
       }
-      parts.push(makePart(c, n, { nx: 0, ny: 0, flipX: false, flipY: false }));
+      if (!merge) parts.push(makePart(c, n, { nx: 0, ny: 0, flipX: false, flipY: false }));
       at += n;
     }
+    if (merge) for (const i of merge.order) mergedParts.push(makePart(covs[i], total, { nx: 0, ny: 0, flipX: false, flipY: false }));
     // One convention for the whole layer, so that the points of an area over 0° / 180° lie side by side.
     const conv = chooseLonShift(xy, 2, 0);
     if (conv !== 'keep') for (let i = 0; i < xy.length; i += 2) xy[i] = wrapLon(xy[i], conv);
@@ -543,14 +642,18 @@ export function parseCoverageJson(json: unknown, options: ParseOptions = {}): Co
   const cache = new Map<string, Float32Array>();
   const CACHE_MAX = 8;
 
+  /** The (part, local time index) pairs that make up layer time `ti`. */
+  const sliceOf = (ti: number): { part: Part; ti: number }[] =>
+    merge ? [{ part: mergedParts[ti], ti: 0 }] : parts.map((part) => ({ part, ti }));
+
   const fill = (param: string, ti: number): Float32Array => {
     const out = new Float32Array(total);
     let at = 0;
-    for (const part of parts) {
-      const range = part.ranges.get(param)!;
-      const view = out.subarray(at, at + part.spatial);
-      extract(part, range, isGrid, ti, levelIndex, view);
-      at += part.spatial;
+    for (const s of sliceOf(ti)) {
+      const range = s.part.ranges.get(param)!;
+      const view = out.subarray(at, at + s.part.spatial);
+      extract(s.part, range, isGrid, s.ti, levelIndex, view);
+      at += s.part.spatial;
     }
     return out;
   };
@@ -585,15 +688,15 @@ export function parseCoverageJson(json: unknown, options: ParseOptions = {}): Co
     };
     if (!zMulti && !isGrid) {
       // Raw scan: every raw value is used exactly once.
-      for (const part of parts) for (const v of part.ranges.get(key)!.raw) if (typeof v === 'number' && Number.isFinite(v)) scan(v);
+      for (const part of merge ? mergedParts : parts) for (const v of part.ranges.get(key)!.raw) if (typeof v === 'number' && Number.isFinite(v)) scan(v);
     } else {
       const buf = new Float32Array(total);
       for (let ti = 0; ti < nTimes; ti++) {
         buf.fill(NaN);
         let at = 0;
-        for (const part of parts) {
-          extract(part, part.ranges.get(key)!, isGrid, ti, levelIndex, buf.subarray(at, at + part.spatial));
-          at += part.spatial;
+        for (const s of sliceOf(ti)) {
+          extract(s.part, s.part.ranges.get(key)!, isGrid, s.ti, levelIndex, buf.subarray(at, at + s.part.spatial));
+          at += s.part.spatial;
         }
         for (let i = 0; i < buf.length; i++) if (Number.isFinite(buf[i])) scan(buf[i]);
       }

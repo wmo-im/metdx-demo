@@ -5,6 +5,7 @@ import mscPosition from '../../test/fixtures/edr/msc-position.json';
 import livePosition from '../../test/fixtures/edr/live-position.json';
 import liveArea from '../../test/fixtures/edr/live-area.json';
 import liveAreaFrance from '../../test/fixtures/edr/live-area-france.json';
+import liveAreaSteps from '../../test/fixtures/edr/live-area-steps.json';
 import liveTrajectory from '../../test/fixtures/edr/live-trajectory.json';
 
 const grid = (l: { coords: unknown }) => l.coords as GridSpec;
@@ -471,5 +472,151 @@ describe('times without a zone (MSC)', () => {
     const s = pointSeries(l, 0, key);
     expect(s).toHaveLength(10);
     expect(s[0]).toEqual({ time: '2026-10-30T04:00:00Z', value: expect.closeTo(13.89986, 4) });
+  });
+});
+
+describe('per-time coverages merged into one layer', () => {
+  type Tup = [number, number, number];
+  const pts: Tup[] = [
+    [47, 7, 0],
+    [47, 8, 0],
+    [48, 7, 0],
+    [48, 8, 0],
+  ];
+  /** A polytope-style coverage: composite lat/lon/level + one t value. */
+  const cov = (t: string, vals: number[], over: { points?: Tup[]; step?: number; base?: string } = {}) => ({
+    ...(over.step === undefined ? {} : { 'mars:metadata': { 'Forecast date': over.base ?? t, step: over.step } }),
+    type: 'Coverage',
+    domain: {
+      type: 'Domain',
+      axes: {
+        t: { values: [t] },
+        composite: { dataType: 'tuple', coordinates: ['latitude', 'longitude', 'levelist'], values: over.points ?? pts },
+      },
+    },
+    ranges: { '2t': { type: 'NdArray', dataType: 'float', axisNames: ['2t'], shape: [vals.length], values: vals } },
+  });
+  const coll = (...coverages: unknown[]) => ({
+    type: 'CoverageCollection',
+    domainType: 'MultiPoint',
+    parameters: { '2t': { unit: { symbol: 'K' }, observedProperty: { label: { en: '2t' } } } },
+    coverages,
+  });
+
+  it('live sample: 6 steps over one 95-point domain become one layer with 6 times', () => {
+    const l = parseCoverageJson(liveAreaSteps);
+    expect(l.kind).toBe('points');
+    expect((l.coords as Float64Array).length).toBe(95 * 2);
+    // polytope reports the forecast date in t for every coverage: the valid time is forecast date + step hours
+    expect(l.times).toEqual([
+      '2026-11-10T00:00:00Z',
+      '2026-11-10T01:00:00Z',
+      '2026-11-10T02:00:00Z',
+      '2026-11-10T03:00:00Z',
+      '2026-11-10T04:00:00Z',
+      '2026-11-10T05:00:00Z',
+    ]);
+    expect(l.values('2t', 0)).toHaveLength(95);
+    expect(l.values('2t', 0)[0]).toBeCloseTo(281.9319, 3);
+    expect(l.values('2t', 1)[0]).toBeCloseTo(281.5455, 3);
+    expect(l.values('2t', 5)[0]).toBeCloseTo(281.5878, 3);
+    const { min, max } = l.parameters[0];
+    const all = [0, 1, 2, 3, 4, 5].flatMap((i) => arr(l.values('2t', i)));
+    expect(min).toBe(Math.min(...all));
+    expect(max).toBe(Math.max(...all));
+  });
+
+  it('distinct t values: sorted by time, each time keeps its own values', () => {
+    const l = parseCoverageJson(coll(cov('2026-01-01T02:00:00Z', [3, 3, 3, 3]), cov('2026-01-01T00:00:00Z', [1, 1, 1, 1]), cov('2026-01-01T01:00:00Z', [2, 2, 2, 2])));
+    expect(l.times).toEqual(['2026-01-01T00:00:00Z', '2026-01-01T01:00:00Z', '2026-01-01T02:00:00Z']);
+    expect((l.coords as Float64Array).length).toBe(4 * 2);
+    expect(arr(l.values('2t', 0))).toEqual([1, 1, 1, 1]);
+    expect(arr(l.values('2t', 1))).toEqual([2, 2, 2, 2]);
+    expect(arr(l.values('2t', 2))).toEqual([3, 3, 3, 3]);
+    expect(l.parameters[0]).toMatchObject({ min: 1, max: 3 });
+  });
+
+  it('duplicate timestamp: the first coverage wins', () => {
+    const l = parseCoverageJson(coll(cov('2026-01-01T01:00:00Z', [5, 5, 5, 5]), cov('2026-01-01T00:00:00Z', [1, 1, 1, 1]), cov('2026-01-01T01:00:00Z', [9, 9, 9, 9])));
+    expect(l.times).toEqual(['2026-01-01T00:00:00Z', '2026-01-01T01:00:00Z']);
+    expect(arr(l.values('2t', 1))).toEqual([5, 5, 5, 5]);
+    expect(l.parameters[0]).toMatchObject({ min: 1, max: 5 }); // the dropped duplicate does not count
+  });
+
+  it('does not merge when one coordinate differs (even an unsampled one)', () => {
+    const moved = pts.map((p) => [...p] as Tup);
+    moved[2][1] = 7.0001; // a middle point
+    const l = parseCoverageJson(coll(cov('2026-01-01T00:00:00Z', [1, 1, 1, 1]), cov('2026-01-01T01:00:00Z', [2, 2, 2, 2], { points: moved })));
+    expect(l.times).toEqual(['2026-01-01T00:00:00Z']);
+    expect((l.coords as Float64Array).length).toBe(8 * 2); // concatenated as before
+  });
+
+  it('does not merge reordered points', () => {
+    const rev = [...pts].reverse();
+    const l = parseCoverageJson(coll(cov('2026-01-01T00:00:00Z', [1, 2, 3, 4]), cov('2026-01-01T01:00:00Z', [4, 3, 2, 1], { points: rev })));
+    expect((l.coords as Float64Array).length).toBe(8 * 2);
+    expect(l.times).toHaveLength(1);
+  });
+
+  it('does not merge differing levels', () => {
+    const up = pts.map((p) => [p[0], p[1], 500] as Tup);
+    const l = parseCoverageJson(coll(cov('2026-01-01T00:00:00Z', [1, 1, 1, 1]), cov('2026-01-01T01:00:00Z', [2, 2, 2, 2], { points: up })));
+    expect((l.coords as Float64Array).length).toBe(8 * 2);
+    expect(l.times).toHaveLength(1);
+  });
+
+  it('does not merge a different point count', () => {
+    const l = parseCoverageJson(coll(cov('2026-01-01T00:00:00Z', [1, 1, 1, 1]), cov('2026-01-01T01:00:00Z', [2, 2, 2], { points: pts.slice(0, 3) })));
+    expect((l.coords as Float64Array).length).toBe(7 * 2);
+  });
+
+  /** `cov` plus extra domain axes / mars metadata. */
+  const withAxes = (c: ReturnType<typeof cov>, axes: Record<string, unknown>) => {
+    const d = c.domain as { axes: Record<string, unknown> };
+    return { ...c, domain: { ...c.domain, axes: { ...d.axes, ...axes } } };
+  };
+
+  it('repeated MARS steps still give valid times; duplicates collapse (first wins)', () => {
+    const base = '2026-01-01T00:00:00Z';
+    const l = parseCoverageJson(
+      coll(
+        cov(base, [10, 10, 10, 10], { step: 0 }),
+        cov(base, [11, 11, 11, 11], { step: 1 }),
+        cov(base, [99, 99, 99, 99], { step: 1 }),
+        cov(base, [12, 12, 12, 12], { step: 2 }),
+      ),
+    );
+    expect(l.times).toEqual(['2026-01-01T00:00:00Z', '2026-01-01T01:00:00Z', '2026-01-01T02:00:00Z']);
+    expect(arr(l.values('2t', 1))).toEqual([11, 11, 11, 11]);
+    expect(arr(l.values('2t', 2))).toEqual([12, 12, 12, 12]);
+  });
+
+  it('does not merge coverages that differ in an unrecognised axis (ensemble)', () => {
+    const l = parseCoverageJson(
+      coll(
+        withAxes(cov('2026-01-01T00:00:00Z', [1, 1, 1, 1]), { ensemble: { values: [1] } }),
+        withAxes(cov('2026-01-01T01:00:00Z', [2, 2, 2, 2]), { ensemble: { values: [2] } }),
+      ),
+    );
+    expect(l.times).toEqual(['2026-01-01T00:00:00Z']);
+    expect((l.coords as Float64Array).length).toBe(8 * 2);
+  });
+
+  it('does not merge when only one coverage has an extra axis', () => {
+    const l = parseCoverageJson(
+      coll(withAxes(cov('2026-01-01T00:00:00Z', [1, 1, 1, 1]), { ensemble: { values: [1] } }), cov('2026-01-01T01:00:00Z', [2, 2, 2, 2])),
+    );
+    expect((l.coords as Float64Array).length).toBe(8 * 2);
+  });
+
+  it('merges coverages that share the same ensemble value', () => {
+    const l = parseCoverageJson(
+      coll(
+        withAxes(cov('2026-01-01T00:00:00Z', [1, 1, 1, 1]), { ensemble: { values: [3] } }),
+        withAxes(cov('2026-01-01T01:00:00Z', [2, 2, 2, 2]), { ensemble: { values: [3] } }),
+      ),
+    );
+    expect(l.times).toEqual(['2026-01-01T00:00:00Z', '2026-01-01T01:00:00Z']);
+    expect((l.coords as Float64Array).length).toBe(4 * 2);
   });
 });

@@ -1,5 +1,5 @@
 import type { BBox, DrawKind, Geometry } from '../lib/types';
-import type { DataLayer, DataSelectHandler, ShowDataOptions } from '../lib/covjsonTypes';
+import type { DataLayer, DataSelectHandler, DataStyle, ShowDataOptions } from '../lib/covjsonTypes';
 
 /**
  * The engine-neutral map contract. Pages only see {@link MapApi} (via `useMap`); each map engine
@@ -56,6 +56,12 @@ export interface MapApi {
   showData(layer: DataLayer, opts: ShowDataOptions): void;
   /** Remove the data layer and release its resources. */
   clearData(): void;
+  /**
+   * Optional: when the browser is idle, compute what `showData` will need for the time steps `timeIndices` of the shown
+   * `layer` (filled contours), in that order, so stepping to them is instant. Returns a cancel function; the work
+   * also stops when the data layer is cleared or replaced. A no-op for what cannot be precomputed.
+   */
+  prefetchData?(layer: DataLayer, opts: { param: string; timeIndices: readonly number[]; style?: DataStyle }): () => void;
   /** Subscribe to clicks on drawn data; returns an unsubscribe function. */
   onDataSelect(cb: DataSelectHandler): () => void;
   /**

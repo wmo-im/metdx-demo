@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import EdrPage from './index';
@@ -10,6 +10,7 @@ import { createMockFetch } from '../../lib/mockFetch';
 import type { Geometry } from '../../lib/types';
 import type { DataLayer, DataSelectHandler, ShowDataOptions } from '../../lib/covjsonTypes';
 import type { CovJsonLayer } from '../../lib/covjson';
+import liveAreaSteps from '../../../test/fixtures/edr/live-area-steps.json';
 
 const COL = 'https://polytope-edr.lumi.apps.dte.destination-earth.eu/collections/operational-data';
 
@@ -17,6 +18,7 @@ class StubMap extends MapController {
   next: Geometry = { type: 'Point', coordinates: [10, 50] };
   calls: { layer: DataLayer; opts: ShowDataOptions }[] = [];
   clears = 0;
+  prefetchLog: { timeIndices: readonly number[]; param: string; cancelled: boolean }[] = [];
   selectCb: DataSelectHandler | null = null;
   drawGeometry(): Promise<Geometry> {
     return Promise.resolve(this.next);
@@ -26,6 +28,13 @@ class StubMap extends MapController {
   }
   clearData(): void {
     this.clears++;
+  }
+  prefetchData(_layer: DataLayer, opts: { param: string; timeIndices: readonly number[] }): () => void {
+    const rec = { param: opts.param, timeIndices: opts.timeIndices, cancelled: false };
+    this.prefetchLog.push(rec);
+    return () => {
+      rec.cancelled = true;
+    };
   }
   onDataSelect(cb: DataSelectHandler): () => void {
     this.selectCb = cb;
@@ -313,6 +322,90 @@ describe('EDR result on the map', () => {
     expect(map.last.layer).not.toBe(first);
     expect(map.last.opts).toMatchObject({ param: 'b', timeIndex: 1 });
     expect(within(panel).getByTestId('edr-selected')).toHaveTextContent('= 2112 m');
+  });
+
+  describe('time slider on a multi-step area result', () => {
+    it('opens on the first step with step labels; arrow keys step; the map is redrawn with the same parameter and opacity', async () => {
+      renderPage(() => liveAreaSteps);
+      const user = await query('area');
+      const panel = await screen.findByTestId('edr-result');
+      const layer = map.last.layer as CovJsonLayer;
+      expect(layer.times.length).toBe(6);
+      expect(map.last.opts).toMatchObject({ timeIndex: 0, style: 'contours' });
+      expect(within(panel).getByTestId('edr-time-label')).toHaveTextContent(`Time: ${layer.times[0]}`);
+      expect(within(panel).getByTestId('edr-time-step')).toHaveTextContent('Step 1/6');
+      const slider = within(panel).getByRole('slider', { name: 'Time' });
+      slider.focus();
+      const param = map.last.opts.param;
+      await user.keyboard('{ArrowRight}');
+      expect(map.last.opts).toMatchObject({ timeIndex: 1, param, style: 'contours' });
+      expect(within(panel).getByTestId('edr-time-step')).toHaveTextContent('Step 2/6');
+      // (a second move within one animation frame is drawn by that frame's callback, hence waitFor)
+      await user.keyboard('{End}');
+      await waitFor(() => expect(map.last.opts.timeIndex).toBe(5));
+      await user.keyboard('{Home}');
+      await waitFor(() => expect(map.last.opts.timeIndex).toBe(0));
+      expect(map.last.layer).toBe(layer); // never re-parsed while sliding
+    });
+
+    it('Play steps about every half second, loops, and Pause (or a drag) stops it; Space on the slider toggles', async () => {
+      renderPage(() => liveAreaSteps);
+      const user = await query('area');
+      const panel = await screen.findByTestId('edr-result');
+      await user.click(within(panel).getByRole('button', { name: 'Play' }));
+      expect(within(panel).getByRole('button', { name: 'Pause' })).toBeInTheDocument();
+      await waitFor(() => expect(map.last.opts.timeIndex).toBe(1), { timeout: 2000 });
+      await waitFor(() => expect(map.last.opts.timeIndex).toBe(2), { timeout: 2000 });
+      await user.click(within(panel).getByRole('button', { name: 'Pause' }));
+      const stopped = map.last.opts.timeIndex;
+      await new Promise((r) => setTimeout(r, 700));
+      expect(map.last.opts.timeIndex).toBe(stopped);
+
+      const slider = within(panel).getByRole('slider', { name: 'Time' });
+      slider.focus();
+      await user.keyboard(' ');
+      expect(within(panel).getByRole('button', { name: 'Pause' })).toBeInTheDocument();
+      await user.keyboard('{ArrowRight}'); // touching the slider pauses
+      expect(within(panel).getByRole('button', { name: 'Play' })).toBeInTheDocument();
+    });
+
+    it('asks the map to precompute the next and previous 2 steps, and cancels when the step or parameter changes', async () => {
+      renderPage(() => liveAreaSteps);
+      const user = await query('area');
+      const panel = await screen.findByTestId('edr-result');
+      const first = map.prefetchLog[map.prefetchLog.length - 1];
+      expect(first.timeIndices).toEqual([1, 2]); // step 0: no previous
+      const slider = within(panel).getByRole('slider', { name: 'Time' });
+      slider.focus();
+      await user.keyboard('{ArrowRight}{ArrowRight}');
+      await waitFor(() => expect(map.last.opts.timeIndex).toBe(2));
+      const last = map.prefetchLog[map.prefetchLog.length - 1];
+      expect(last.timeIndices).toEqual([3, 1, 4, 0]);
+      expect(first.cancelled).toBe(true);
+      expect(last.cancelled).toBe(false);
+      cleanup();
+      expect(last.cancelled).toBe(true);
+    });
+
+    it('draws at most once per animation frame while dragging (latest position wins)', async () => {
+      renderPage(() => liveAreaSteps);
+      const user = await query('area');
+      const panel = await screen.findByTestId('edr-result');
+      const slider = within(panel).getByRole('slider', { name: 'Time' });
+      slider.focus();
+      const frames: FrameRequestCallback[] = [];
+      vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => frames.push(cb));
+      const before = map.calls.length;
+      await user.keyboard('{ArrowRight}{ArrowRight}{ArrowRight}');
+      // the first move is drawn at once, the next two wait for the frame
+      expect(map.calls.length - before).toBe(1);
+      expect(map.last.opts.timeIndex).toBe(1);
+      expect(within(panel).getByTestId('edr-time-step')).toHaveTextContent('Step 4/6'); // the slider itself is not delayed
+      act(() => frames.splice(0).forEach((cb) => cb(0)));
+      expect(map.calls.length - before).toBe(2);
+      expect(map.last.opts.timeIndex).toBe(3);
+      vi.restoreAllMocks();
+    });
   });
 
   it('is cleared by a new query, a mode change and leaving the page', async () => {

@@ -476,10 +476,88 @@ export function expandTemporalValues(values: unknown, max = MAX_TEMPORAL_VALUES)
 
 /** The temporal `values` of a collection / instance document (`null` without any usable instant). */
 export function parseTemporalValues(data: unknown): ExpandedTimes | null {
+  const e = expandTemporalValues(rawTemporalValues(data));
+  return e.times.length ? e : null;
+}
+
+function rawTemporalValues(data: unknown): unknown {
   const d = (data ?? {}) as Json;
   const ext = (d.extents ?? d.extent ?? {}) as Json;
-  const e = expandTemporalValues(ext.temporal?.values);
-  return e.times.length ? e : null;
+  return ext.temporal?.values;
+}
+
+/** The latest instant of a temporal `values` list, and the step grid it sits on. */
+export interface LatestTime {
+  /** `YYYY-MM-DDTHH:MM:SSZ` */
+  last: string;
+  /** `last` - 1 day, snapped down to the step grid of the segment `last` belongs to (as is for a plain instant). */
+  dayBefore: string;
+}
+
+/**
+ * The latest instant a temporal `values` list offers, computed without expanding it (a `PT1H` series
+ * from 1940 has ~760k instants): the end of a `start/end/period` segment is moved down to its last step
+ * (`start + n * period <= end`). `null` without any usable entry.
+ */
+export function lastTemporalInstant(values: unknown): LatestTime | null {
+  let best: { last: number; dayBefore: number } | null = null;
+  const entries = Array.isArray(values) ? values : typeof values === 'string' ? [values] : [];
+  for (const raw of entries) {
+    if (typeof raw !== 'string') continue;
+    for (const entry of raw.split(',')) {
+      const parts = entry.trim().split('/');
+      let cand: { last: number; dayBefore: number } | null = null;
+      if (parts.length === 1) {
+        const t = parseInstant(parts[0]);
+        if (t != null && Number.isFinite(t)) cand = { last: t, dayBefore: t - DAY_MS };
+      } else if (parts.length === 3) {
+        const a = parseInstant(parts[0]);
+        const b = parseInstant(parts[1]);
+        const p = parseDuration(parts[2]);
+        if (a == null || b == null || !p || !Number.isFinite(a) || !Number.isFinite(b) || b < a) continue;
+        const at = (i: number) => (p.months ? addMonths(a, p.months * i) : a) + p.ms * i;
+        /** The largest step index with `at(i) <= limit` (`limit >= a`). */
+        const indexAtOrBefore = (limit: number): number | null => {
+          if (limit < a) return null;
+          const approx = p.months * 30.4375 * DAY_MS + p.ms;
+          let i = Math.floor((limit - a) / approx) + 1;
+          if (!Number.isFinite(i)) return null;
+          for (let n = 0; n < 64 && i > 0 && !(at(i) <= limit); n++) i--;
+          for (let n = 0; n < 64 && at(i + 1) <= limit; n++) i++;
+          return at(i) <= limit && Number.isFinite(at(i)) ? i : null;
+        };
+        const iLast = indexAtOrBefore(b);
+        if (iLast == null) continue;
+        const last = at(iLast);
+        const iDay = indexAtOrBefore(last - DAY_MS);
+        cand = { last, dayBefore: iDay == null ? a : at(iDay) }; // a day before the segment's start: its first step
+      }
+      if (cand && (!best || cand.last > best.last)) best = cand;
+    }
+  }
+  return best && !Number.isNaN(new Date(best.last).getTime()) ? { last: toIso(best.last), dayBefore: toIso(best.dayBefore) } : null;
+}
+
+/** {@link lastTemporalInstant} of a collection / instance document's temporal `values`. */
+export function parseLatestTime(data: unknown): LatestTime | null {
+  return lastTemporalInstant(rawTemporalValues(data));
+}
+
+/**
+ * Default start/end for a list too long to expand ({@link ExpandedTimes.capped}): the latest available
+ * instants. position (time series): end = latest, start = a day before it on the step grid (not before the
+ * extent's start); every other type: start = end = latest.
+ */
+export function defaultDatetimeLatest(mode: EdrMode, latest: LatestTime, extentStart?: string | null): DatetimeFields {
+  const e = splitIso(latest.last);
+  let startIso = latest.last;
+  if (mode === 'position') {
+    startIso = latest.dayBefore;
+    const lo = extentStart ? Date.parse(extentStart) : NaN;
+    if (!Number.isNaN(lo) && Date.parse(startIso) < lo) startIso = toIso(Math.min(lo, Date.parse(latest.last)));
+  }
+  const s = splitIso(startIso);
+  return { startDate: s.date, startTime: s.time, endDate: e.date, endTime: e.time };
 }
 
 /** The distinct `YYYY-MM-DD` dates of a sorted instant list. */
@@ -511,6 +589,194 @@ export function defaultDatetimeFromTimes(mode: EdrMode, times: string[]): Dateti
   }
   const e = splitIso(end);
   return { startDate: s.date, startTime: s.time, endDate: e.date, endTime: e.time };
+}
+
+/* ------------------------------------------- time range of area-type queries (area, radius, cube) */
+
+/** Query types that can return several time steps as a gridded result (the "Time steps" choice). */
+export const RANGE_MODES: readonly EdrMode[] = ['area', 'radius', 'cube'];
+
+/** A "Range" covers this many steps after the start (so 7 instants, the start included). */
+export const RANGE_STEPS = 6;
+
+/** The step of a time list: calendar months plus fixed milliseconds (an ISO 8601 duration). */
+export interface TimeStep {
+  months: number;
+  ms: number;
+}
+
+/**
+ * The step between instants at `startIso`, from the `start/end/period` segment of the temporal `values` that
+ * contains it (not needing the list to be expanded). `null` when no segment does (a plain list of instants, no `values`).
+ */
+export function temporalStepAt(data: unknown, startIso: string): TimeStep | null {
+  const t = parseInstant(startIso);
+  if (t == null) return null;
+  const raw = rawTemporalValues(data);
+  const entries = Array.isArray(raw) ? raw : typeof raw === 'string' ? [raw] : [];
+  for (const e of entries) {
+    if (typeof e !== 'string') continue;
+    for (const entry of e.split(',')) {
+      const parts = entry.trim().split('/');
+      if (parts.length !== 3) continue;
+      const a = parseInstant(parts[0]);
+      const b = parseInstant(parts[1]);
+      const p = parseDuration(parts[2]);
+      if (a != null && b != null && p && a <= t && t <= b) return p;
+    }
+  }
+  return null;
+}
+
+/** The latest the end of a range can be when the step is unknown: start + 6 hours. */
+const UNKNOWN_STEP_RANGE_MS = 6 * 3600_000;
+
+/** What {@link rangeBounds} needs to know about the available times. */
+export interface RangeSource {
+  /** The full list of available instants (sorted), when it is known in full. */
+  times?: string[] | null;
+  /** The step at the start, for capped or unknown lists (default: 6 h in all). */
+  step?: TimeStep | null;
+  /** The last available instant of a capped list. */
+  last?: string | null;
+  /** The extent's start: a range moved back from the last instant does not start before it. */
+  notBefore?: string | null;
+}
+
+/**
+ * The start and end (`YYYY-MM-DDTHH:MM:SSZ`) of a time range of {@link RANGE_STEPS} steps from `startIso`.
+ * - Full list of `times`: the end is the 6th instant after the start, or the last one when fewer follow.
+ * - Capped list (`last` known): end = start + 6 x `step`, clamped to `last`.
+ * - Unknown list: end = start + 6 x `step`, or + 6 h when the step is not known (nothing to clamp to).
+ * When the start is already the last available instant and `moveStart` is set, the range is moved back to
+ * cover the last 7 instants instead (the 7th from last in a full list; `last` - 6 x step, not before `notBefore`,
+ * otherwise). `null` when the start is not a valid time.
+ */
+export function rangeBounds(startIso: string, src: RangeSource, moveStart = true): { start: string; end: string } | null {
+  const s = parseInstant(startIso);
+  if (s == null) return null;
+  const { times, step, last, notBefore } = src;
+  const keep = toIso(s);
+  if (times) {
+    if (!times.length) return { start: keep, end: keep };
+    const after = times.filter((t) => Date.parse(t) > s);
+    if (after.length) return { start: keep, end: after[Math.min(RANGE_STEPS, after.length) - 1] };
+    const n = times.length;
+    return moveStart ? { start: times[Math.max(0, n - 1 - RANGE_STEPS)], end: times[n - 1] } : { start: keep, end: keep };
+  }
+  const shift = (from: number, dir: 1 | -1): number | null => {
+    const t = (step?.months ? addMonths(from, dir * step.months * RANGE_STEPS) : from) + dir * (step ? step.ms * RANGE_STEPS : UNKNOWN_STEP_RANGE_MS);
+    return Number.isFinite(t) && !Number.isNaN(new Date(t).getTime()) ? t : null;
+  };
+  const lastMs = last ? parseInstant(last) : null;
+  if (lastMs != null && s >= lastMs && moveStart) {
+    let from = shift(lastMs, -1);
+    const lo = notBefore ? parseInstant(notBefore) : null;
+    if (from != null && lo != null && from < lo) from = Math.min(lo, lastMs);
+    return from == null ? null : { start: toIso(from), end: toIso(lastMs) };
+  }
+  const end = shift(s, 1);
+  if (end == null) return null;
+  return { start: keep, end: toIso(lastMs != null ? Math.max(s, Math.min(end, lastMs)) : end) };
+}
+
+/**
+ * How many instants `start..end` (inclusive) holds: counted in `times` when listed, else from `step`
+ * (hourly when unknown). `null` for an invalid or reversed range.
+ */
+export function countSteps(startIso: string, endIso: string, times: string[] | null, step: TimeStep | null): number | null {
+  const s = parseInstant(startIso);
+  const e = parseInstant(endIso);
+  if (s == null || e == null || e < s) return null;
+  if (times) return times.filter((t) => {
+    const ms = Date.parse(t);
+    return ms >= s && ms <= e;
+  }).length;
+  const per = step ? step.months * 30.4375 * DAY_MS + step.ms : 3600_000;
+  return Math.floor((e - s) / per) + 1;
+}
+
+/** Mean size of one value (a point, a step, a parameter) in a CoverageJSON response, in bytes (about 0.24 KB). */
+export const BYTES_PER_VALUE = 240;
+/** A request estimated above this many bytes gets a warning. */
+export const WARN_BYTES = 30_000_000;
+
+/** Grid spacing in degrees of collections whose spacing is known (the metadata does not say). */
+const KNOWN_GRID_SPACING: Record<string, number> = { 'operational-data': 0.1 };
+
+/** The known grid spacing (degrees) of a collection, from its id; `null` when unknown. */
+export function knownGridSpacing(collectionUrl: string): number | null {
+  const id = collectionBase(collectionUrl).split('/').pop() ?? '';
+  return KNOWN_GRID_SPACING[id] ?? null;
+}
+
+/** The area, in square degrees, a query covers (rectangle/cube box, polygon, circle); `null` when it is not complete. */
+export function queryAreaDeg2(
+  mode: EdrMode,
+  points: Position[],
+  areaShape: AreaShape,
+  radius: number | null,
+  radiusUnits: string,
+): number | null {
+  let a: number | null = null;
+  if (mode === 'radius') {
+    if (points.length < 1 || radius == null) return null;
+    const perDeg: Record<string, number> = { degrees: 1, km: 111, m: 111_000, mi: 111 / 1.609344 };
+    const r = radius / (perDeg[radiusUnits] ?? 1);
+    a = Math.PI * r * r;
+  } else if (mode === 'area' && areaShape === 'polygon') {
+    const ring = polygonRing(points);
+    if (ring.length < 4) return null;
+    let sum = 0;
+    for (let i = 0; i < ring.length - 1; i++) sum += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1];
+    a = Math.abs(sum) / 2;
+  } else if (mode === 'area' || mode === 'cube') {
+    if (points.length < 2) return null;
+    const b = cornerBox(points);
+    a = (b.maxLon - b.minLon) * (b.maxLat - b.minLat);
+  }
+  return a != null && Number.isFinite(a) && a > 0 ? a : null;
+}
+
+/** The estimated number of grid points of an area of `areaDeg2` square degrees. */
+export const estimatePoints = (areaDeg2: number, spacingDeg: number): number => Math.max(1, Math.round(areaDeg2 / (spacingDeg * spacingDeg)));
+
+/** The grid spacing (degrees) a response implies for the area it was asked for (`null` when too few points to tell). */
+export function spacingFromResponse(areaDeg2: number, points: number): number | null {
+  return points >= 25 && areaDeg2 > 0 ? Math.sqrt(areaDeg2 / points) : null;
+}
+
+/** The grid points of one time step of a CoverageJSON response (composite axis, or x * y); `null` if not countable. */
+export function responsePoints(data: unknown): number | null {
+  const d = (data ?? {}) as Json;
+  const cov: Json | undefined = d.type === 'CoverageCollection' ? (Array.isArray(d.coverages) ? d.coverages[0] : undefined) : d;
+  const axes = cov?.domain?.axes as Json | undefined;
+  if (!axes) return null;
+  const len = (a: Json | undefined): number | null => (Array.isArray(a?.values) ? a.values.length : null);
+  const comp = len(axes.composite);
+  if (comp != null) return comp;
+  const x = len(axes.x);
+  const y = len(axes.y);
+  return x != null && y != null ? x * y : null;
+}
+
+export interface SizeEstimate {
+  steps: number;
+  /** `null` when the grid spacing (so the points) is unknown. */
+  bytes: number | null;
+}
+
+/** points x steps x parameters x {@link BYTES_PER_VALUE}; `bytes` is `null` without a points estimate. */
+export function estimateSize(points: number | null, steps: number, parameters: number): SizeEstimate {
+  return { steps, bytes: points == null ? null : points * steps * Math.max(1, parameters) * BYTES_PER_VALUE };
+}
+
+/** `about 7 steps, ~3.4 MB` (or `size unknown`). */
+export function describeEstimate(e: SizeEstimate, assumedHourly = false): string {
+  const n = `about ${e.steps} step${e.steps === 1 ? '' : 's'}${assumedHourly ? ' (hourly assumed)' : ''}`;
+  if (e.bytes == null) return `${n}, size unknown`;
+  const mb = e.bytes / 1e6;
+  return `${n}, ~${mb < 0.1 ? '<0.1' : mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
 }
 
 function stepLabel(ms: number): string {

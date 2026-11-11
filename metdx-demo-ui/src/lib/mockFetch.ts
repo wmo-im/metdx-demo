@@ -10,7 +10,7 @@
  * Fixtures: records/*.json (search + item lookup), collections/<id>.json,
  * instances/<col>.json (+ <col>.instance.json for any instance id),
  * schema/<col>.json, edr/<query-type>.json (falls back to position.json; area/trajectory/corridor/cube use
- * edr/live-*.json, see LIVE_FIXTURE),
+ * edr/live-*.json, see LIVE_FIXTURE; an area/cube query with a `datetime` range gets edr/live-area-steps.json),
  * jobs/running.json + jobs/successful.json, maps/map.png.
  *
  * Behaviour switches (query params of the upstream URL):
@@ -185,8 +185,10 @@ export function createMockFetch(opts: MockOptions = {}): MockFetch {
         if (q.get('async') === 'true') {
           return jsonResponse({ status: 303, location: proxyUrl(`${origin}/jobs/job-1`) });
         }
-        const doc =
-          (await loadJson(`edr/${LIVE_FIXTURE[queryType] ?? queryType}.json`)) ?? (await loadJson('edr/position.json'));
+        // An area / cube query over a time range (`datetime=a/b`) gets the multi-step sample: one coverage per step.
+        const multiStep = (queryType === 'area' || queryType === 'cube') && (q.get('datetime') ?? '').includes('/');
+        const fixture = multiStep ? 'live-area-steps' : (LIVE_FIXTURE[queryType] ?? queryType);
+        const doc = (await loadJson(`edr/${fixture}.json`)) ?? (await loadJson('edr/position.json'));
         return jsonResponse(doc);
       }
     }

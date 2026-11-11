@@ -25,11 +25,12 @@ import {
   type ColourScale,
   type DataLayer,
   type DataSelectHandler,
+  type DataStyle,
   type GridSpec,
   type ParamInfo,
   type ShowDataOptions,
 } from '../lib/covjsonTypes';
-import { bandColour, computeContours, contourSupport, getTriangulation, type ContourSet } from '../lib/contour';
+import { bandColour, computeContours, contourSupport, getTriangulation, ContourCache } from '../lib/contour';
 import {
   DrawCancelledError,
   EXTENT_FIT_MAX_ZOOM,
@@ -70,8 +71,17 @@ const extentStyle = new Style({
 const COLOUR_STEPS = 256;
 /** Click tolerance for points / trajectory vertices, in screen pixels. */
 const HIT_TOLERANCE_PX = 8;
-/** Contour sets kept per DataLayer (param × time combinations visited recently). */
-const MAX_CONTOUR_CACHE = 12;
+/** Contour sets are cached per DataLayer in a {@link ContourCache} (64 MB of polygon coordinates, 48 entries). */
+
+/** Run `fn` once when the browser is idle (`requestIdleCallback`, else a short timeout). */
+function whenIdle(fn: () => void): { cancel: () => void } {
+  if (typeof globalThis.requestIdleCallback === 'function') {
+    const id = globalThis.requestIdleCallback(fn, { timeout: 2000 });
+    return { cancel: () => globalThis.cancelIdleCallback(id) };
+  }
+  const id = setTimeout(fn, 30);
+  return { cancel: () => clearTimeout(id) };
+}
 
 /** Canvas size for a grid of `nx × ny` cells: one pixel per cell, each side capped at {@link MAX_CANVAS_DIM}. */
 export function gridCanvasSize(nx: number, ny: number): { width: number; height: number } {
@@ -232,8 +242,10 @@ export class MapController implements MapApi, MapEngine {
   });
   /** Filled contour bands of a point layer (style `contours`); below the points, same slot as the grid image. */
   private readonly dataContourLayer = new VectorLayer({ zIndex: 6, opacity: DEFAULT_CONTOUR_OPACITY });
-  /** Contour sets of the current DataLayer by `param|time` (cleared with the layer). */
-  private contourCache = new globalThis.Map<string, ContourSet | null>();
+  /** Contour sets of the current DataLayer by `param|time` (LRU, byte-bounded; cleared with the layer). */
+  private contourCache = new ContourCache();
+  /** Cancel functions of the running idle prefetches (see {@link prefetchData}). */
+  private readonly prefetches = new Set<() => void>();
   /** `param|time|scale` of the contour source currently shown. */
   private contourKey = '';
   /** Values behind the contour picture (for click lookup). */
@@ -291,6 +303,7 @@ export class MapController implements MapApi, MapEngine {
 
   detach(): void {
     this.cancel();
+    this.cancelPrefetches();
     if (this.clickKey) unByKey(this.clickKey);
     this.clickKey = null;
     this.map?.getTargetElement()?.removeAttribute('data-view');
@@ -444,6 +457,7 @@ export class MapController implements MapApi, MapEngine {
   }
 
   clearData(): void {
+    this.cancelPrefetches();
     this.paintSeq++;
     this.data = null;
     this.colourIdx = null;
@@ -470,6 +484,45 @@ export class MapController implements MapApi, MapEngine {
     this.markStyle(null);
     this.markData(null);
     this.markOpacity(null);
+  }
+
+  prefetchData(layer: DataLayer, opts: { param: string; timeIndices: readonly number[]; style?: DataStyle }): () => void {
+    const param = layer.parameters.find((p) => p.key === opts.param);
+    if (opts.style !== 'contours' || layer.kind !== 'points' || !param || isGridSpec(layer.coords)) return () => {};
+    const coords = layer.coords;
+    const queue = opts.timeIndices.filter((t) => Number.isInteger(t) && t >= 0 && t < Math.max(1, layer.times.length));
+    let handle: { cancel: () => void } | null = null;
+    let done = false;
+    const stop = () => {
+      done = true;
+      handle?.cancel();
+      handle = null;
+      this.prefetches.delete(stop);
+    };
+    const step = () => {
+      handle = null;
+      if (done) return;
+      // the layer was replaced / cleared since scheduling: nothing to prepare for
+      if (this.data !== layer) return stop();
+      // one field per idle slot
+      while (queue.length > 0) {
+        const t = queue.shift() as number;
+        const ckey = `${opts.param}|${t}`;
+        if (this.contourCache.has(ckey)) continue;
+        if (!contourSupport(coords).ok) return stop();
+        this.contourCache.set(ckey, computeContours(getTriangulation(coords), coords, layer.values(opts.param, t), param.min, param.max));
+        break;
+      }
+      if (queue.length === 0) return stop();
+      handle = whenIdle(step);
+    };
+    this.prefetches.add(stop);
+    handle = whenIdle(step);
+    return stop;
+  }
+
+  private cancelPrefetches(): void {
+    for (const stop of [...this.prefetches]) stop();
   }
 
   onDataSelect(cb: DataSelectHandler): () => void {
@@ -541,7 +594,6 @@ export class MapController implements MapApi, MapEngine {
     let set = this.contourCache.get(ckey);
     if (set === undefined) {
       set = computeContours(getTriangulation(coords), coords, values, param.min, param.max);
-      if (this.contourCache.size >= MAX_CONTOUR_CACHE) this.contourCache.delete(this.contourCache.keys().next().value as string);
       this.contourCache.set(ckey, set);
     }
     if (!set) return false;

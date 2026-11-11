@@ -51,6 +51,14 @@ describe('mock fetch', () => {
     expect(data.type).toBe('Coverage');
     expect(mock.calls.filter((c) => c.endsWith('/jobs/job-1'))).toHaveLength(2);
   });
+  it('serves the multi-step area sample for an area query with a datetime range, one step otherwise', async () => {
+    setFetchImpl(createMockFetch());
+    const url = `${H}/collections/operational-data/area?coords=POLYGON((0 0,1 0,1 1,0 1,0 0))&parameter-name=2t&f=json`;
+    const one = await fetchJson<any>(`${url}&datetime=2026-11-09T00:00:00Z`);
+    expect(one.coverages).toHaveLength(1);
+    const range = await fetchJson<any>(`${url}&datetime=2026-11-09T00:00:00Z/2026-11-09T06:00:00Z`);
+    expect(range.coverages.length).toBeGreaterThan(1);
+  });
   it('404s for unknown things and honours fail=', async () => {
     setFetchImpl(createMockFetch());
     await expect(fetchJson(`${H}/collections/nope?f=json`)).rejects.toMatchObject({ status: 404 });

@@ -1,14 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ContourCache,
   MAX_CONTOUR_POINTS,
   bandColourT,
   buildTriangulation,
   computeContours,
+  contourBytes,
   contourLevels,
   contourSupport,
   getTriangulation,
   interpolateToRaster,
   rasterSize,
+  type ContourSet,
   type MultiPolygonCoords,
 } from './contour';
 import { parseCoverageJson } from './covjson';
@@ -349,5 +352,61 @@ describe('area across 0° (polytope delivers 0..360)', () => {
     });
     expect(crossing.length).toBeGreaterThanOrEqual(1);
     expect(mpArea(lowest.coordinates)).toBeGreaterThan(0.6 * 13 * (getTriangulation(coords).bbox[3] - getTriangulation(coords).bbox[1]));
+  });
+});
+
+describe('ContourCache', () => {
+  /** A set whose polygons hold `vertices` vertices in total (16 bytes each). */
+  const setOf = (vertices: number): ContourSet => ({
+    levels: [0, 1],
+    width: 2,
+    height: 2,
+    bands: [{ lower: 0, upper: 1, t: 0.5, coordinates: [[Array.from({ length: vertices }, (_, i) => [i, i])]] }],
+  });
+
+  it('counts polygon coordinate bytes (16 per vertex; null is free)', () => {
+    expect(contourBytes(setOf(10))).toBe(160);
+    expect(contourBytes(null)).toBe(0);
+  });
+
+  it('evicts the least recently used entry beyond the entry cap, and a get refreshes recency', () => {
+    const c = new ContourCache(1e9, 3);
+    c.set('a', setOf(1));
+    c.set('b', setOf(1));
+    c.set('c', setOf(1));
+    expect(c.get('a')).toBeDefined(); // a is now the most recent; b the oldest
+    c.set('d', setOf(1));
+    expect([c.has('a'), c.has('b'), c.has('c'), c.has('d')]).toEqual([true, false, true, true]);
+    expect(c.size).toBe(3);
+  });
+
+  it('evicts by byte budget, tracks the total, and never stores one set larger than the budget', () => {
+    const c = new ContourCache(480, 48); // 30 vertices
+    c.set('a', setOf(10));
+    c.set('b', setOf(10));
+    c.set('c', setOf(10));
+    expect(c.bytes).toBe(480);
+    c.set('d', setOf(10)); // over budget: a goes
+    expect([c.has('a'), c.has('b'), c.has('d')]).toEqual([false, true, true]);
+    expect(c.bytes).toBe(480);
+    c.set('b', setOf(5)); // replacing keeps the total consistent
+    expect(c.bytes).toBe(160 + 160 + 80);
+    c.set('huge', setOf(31));
+    expect(c.has('huge')).toBe(false);
+    expect(c.bytes).toBe(400);
+    c.clear();
+    expect([c.size, c.bytes]).toEqual([0, 0]);
+  });
+
+  it('caches "nothing to draw" (null) as distinct from absent', () => {
+    const c = new ContourCache();
+    c.set('x', null);
+    expect(c.get('x')).toBeNull();
+    expect(c.get('y')).toBeUndefined();
+  });
+
+  it('defaults: 64 MB and 48 entries', () => {
+    const c = new ContourCache();
+    expect([c.maxBytes, c.maxEntries]).toEqual([64 * 1024 * 1024, 48]);
   });
 });

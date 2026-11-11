@@ -11,6 +11,7 @@ import type { LineString } from 'ol/geom';
 import { fromLonLat } from 'ol/proj';
 import { MapController, gridCanvasSize, paintGridRGBA } from './mapController';
 import { Legend, formatLegendValue } from './Legend';
+import type { ContourCache } from '../lib/contour';
 import {
   MAX_CANVAS_DIM,
   VIRIDIS,
@@ -366,6 +367,91 @@ describe('opacity', () => {
     expect(ctxs.reduce((n, c) => n + c.puts, 0)).toBe(puts);
     ctrl.showData(layer, { ...opts(), opacity: 7 }); // clamped
     expect(l.image.getOpacity()).toBe(1);
+  });
+});
+
+describe('contour steps (time slider)', () => {
+  const cache = () => (ctrl as unknown as { contourCache: ContourCache }).contourCache;
+  const styled = (extra = {}) => ({ ...opts(), style: 'contours' as const, ...extra });
+  const bandColours = () =>
+    ctrl.getMap()!.getLayers().getArray().filter((l) => l.getZIndex() === 6 && l.constructor.name === 'VectorLayer')
+      .flatMap((l) => (l as VectorLayer<VectorSource>).getSource()!.getFeatures().map((f) => (f.getStyle() as Style).getFill()!.getColor() as string));
+
+  it('keeps up to 48 steps cached (LRU), so stepping back and forth through 30 steps computes each once', () => {
+    const layer = latticeLayer(12, 8, 30);
+    for (let t = 0; t < 30; t++) ctrl.showData(layer, styled({ timeIndex: t }));
+    expect(cache().size).toBe(30);
+    const before = cache().get('a|0');
+    expect(before).toBeDefined();
+    ctrl.showData(layer, styled({ timeIndex: 0 }));
+    expect(cache().get('a|0')).toBe(before); // the very same set: not recomputed
+    expect(cache().size).toBe(30);
+  });
+
+  it('the colour range stays fixed across steps (levels and band colours come from the parameter min/max, not the step)', () => {
+    const layer = latticeLayer(12, 8, 4);
+    ctrl.showData(layer, styled({ timeIndex: 0 }));
+    const l0 = cache().get('a|0')!.levels;
+    const c0 = new Set(bandColours());
+    ctrl.showData(layer, styled({ timeIndex: 3 }));
+    expect(cache().get('a|3')!.levels).toEqual(l0);
+    for (const c of bandColours()) expect(c0.has(c)).toBe(true);
+  });
+
+  describe('prefetch when idle', () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it('computes the requested steps one idle slot at a time, in order, without touching what is drawn', () => {
+      const layer = latticeLayer(12, 8, 6);
+      ctrl.showData(layer, styled({ timeIndex: 2 }));
+      const src = ctrl.getMap()!.getLayers().getArray().find((l) => l.getZIndex() === 6 && l.constructor.name === 'VectorLayer') as VectorLayer<VectorSource>;
+      const drawn = src.getSource();
+      ctrl.prefetchData(layer, { param: 'a', timeIndices: [3, 1, 4], style: 'contours' });
+      expect(cache().size).toBe(1); // nothing yet: waits for idle
+      vi.advanceTimersByTime(40);
+      expect([cache().has('a|3'), cache().has('a|1'), cache().has('a|4')]).toEqual([true, false, false]);
+      vi.advanceTimersByTime(200);
+      expect([cache().has('a|3'), cache().has('a|1'), cache().has('a|4')]).toEqual([true, true, true]);
+      expect(src.getSource()).toBe(drawn);
+      const hit = cache().get('a|3');
+      ctrl.showData(layer, styled({ timeIndex: 3 })); // the step is a cache hit
+      expect(cache().get('a|3')).toBe(hit);
+    });
+
+    it('is cancelled by its cancel function and by clearData / a new layer', () => {
+      const layer = latticeLayer(12, 8, 6);
+      ctrl.showData(layer, styled());
+      const stop = ctrl.prefetchData(layer, { param: 'a', timeIndices: [1, 2], style: 'contours' });
+      stop();
+      vi.advanceTimersByTime(500);
+      expect(cache().size).toBe(1);
+
+      ctrl.prefetchData(layer, { param: 'a', timeIndices: [1, 2], style: 'contours' });
+      ctrl.clearData();
+      vi.advanceTimersByTime(500);
+      expect(cache().size).toBe(0);
+
+      ctrl.showData(layer, styled());
+      ctrl.prefetchData(layer, { param: 'a', timeIndices: [1, 2], style: 'contours' });
+      ctrl.showData(latticeLayer(12, 8, 6), styled()); // another result replaces the layer
+      vi.advanceTimersByTime(500);
+      expect(cache().has('a|1')).toBe(false);
+      expect(cache().has('a|2')).toBe(false);
+    });
+
+    it('does nothing for points style or a grid', () => {
+      const layer = latticeLayer(12, 8, 6);
+      ctrl.showData(layer, opts());
+      ctrl.prefetchData(layer, { param: 'a', timeIndices: [1], style: 'points' });
+      vi.advanceTimersByTime(500);
+      expect(cache().size).toBe(0);
+      const grid = gridLayer(4, 4, 3);
+      ctrl.showData(grid, opts());
+      ctrl.prefetchData(grid, { param: 'a', timeIndices: [1], style: 'contours' });
+      vi.advanceTimersByTime(500);
+      expect(cache().size).toBe(0);
+    });
   });
 });
 

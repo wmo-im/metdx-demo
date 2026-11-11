@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BYTES_PER_VALUE,
   availableDates,
+  countSteps,
+  describeEstimate,
+  estimatePoints,
+  estimateSize,
+  knownGridSpacing,
+  queryAreaDeg2,
+  rangeBounds,
+  responsePoints,
+  spacingFromResponse,
+  temporalStepAt,
   availableModes,
   buildEdrUrl,
   collectionBase,
@@ -8,6 +19,9 @@ import {
   combineDatetime,
   defaultDatetime,
   defaultDatetimeFromTimes,
+  defaultDatetimeLatest,
+  lastTemporalInstant,
+  parseLatestTime,
   describeSteps,
   expandTemporalValues,
   DEFAULT_CORRIDOR_HEIGHT,
@@ -571,5 +585,145 @@ describe('temporal values', () => {
     expect(describeSteps(expandTemporalValues(['2026-01-01/2026-01-03/P1D']).times)).toBe('daily');
     expect(describeSteps(expandTemporalValues(['2026-01-01T00:00:00Z/2026-01-01T01:00:00Z/PT15M']).times)).toBe('every 15 min');
     expect(describeSteps(['2026-01-01T00:00:00Z'])).toBe('');
+  });
+
+  it('lastTemporalInstant: the last step of a period segment, without expanding it', () => {
+    // ERA5: 1940 -> 2026, hourly (~760k instants)
+    expect(lastTemporalInstant(['1940-01-01T00:00:00Z/2026-10-01T23:00:00Z/PT1H'])).toEqual({ last: '2026-10-01T23:00:00Z', dayBefore: '2026-09-30T23:00:00Z' });
+    // the end is not on a step: the last step <= end (and a day before it on the grid)
+    expect(lastTemporalInstant(['2026-01-01T00:00:00Z/2026-01-10T07:30:00Z/PT6H'])).toEqual({ last: '2026-01-10T06:00:00Z', dayBefore: '2026-01-09T06:00:00Z' });
+    expect(lastTemporalInstant(['2026-01-01T00:00:00Z/2026-01-10T07:30:00Z/PT5H'])).toEqual({ last: '2026-01-10T04:00:00Z', dayBefore: '2026-01-09T03:00:00Z' });
+    // calendar months; a segment shorter than a day: its first step
+    expect(lastTemporalInstant(['2026-01-31T00:00:00Z/2026-04-30T12:00:00Z/P1M'])?.last).toBe('2026-04-30T00:00:00Z');
+    expect(lastTemporalInstant(['2026-01-01T00:00:00Z/2026-01-01T06:00:00Z/PT1H'])).toEqual({ last: '2026-01-01T06:00:00Z', dayBefore: '2026-01-01T00:00:00Z' });
+    // explicit list / unordered mixed segments: the latest of everything
+    expect(lastTemporalInstant(['2026-11-09T06:00:00Z', '2026-11-10T00:00:00Z', '2026-11-08T12:00:00Z'])?.last).toBe('2026-11-10T00:00:00Z');
+    expect(lastTemporalInstant('2026-01-01T00:00:00Z,2026-01-05T00:00:00Z')).toEqual({ last: '2026-01-05T00:00:00Z', dayBefore: '2026-01-04T00:00:00Z' });
+    expect(lastTemporalInstant(['2026-03-01T00:00:00Z/2026-03-02T00:00:00Z/PT1H', '2026-01-01T00:00:00Z/2026-01-02T00:00:00Z/P1D', '2026-02-10T00:00:00Z'])?.last).toBe('2026-03-02T00:00:00Z');
+    // junk
+    expect(lastTemporalInstant(undefined)).toBeNull();
+    expect(lastTemporalInstant(['junk', '2026-01-02/2026-01-01/PT1H', '2026-01-01/2026-01-02/P0D'])).toBeNull();
+    expect(parseLatestTime({ extent: { temporal: { values: ['2026-01-01T00:00:00Z/2026-01-02T00:00:00Z/PT1H'] } } })?.last).toBe('2026-01-02T00:00:00Z');
+  });
+
+  it('defaultDatetimeLatest: position = last day, other modes = the last instant', () => {
+    const latest = { last: '2026-10-01T23:00:00Z', dayBefore: '2026-09-30T23:00:00Z' };
+    expect(defaultDatetimeLatest('position', latest)).toEqual({ startDate: '2026-09-30', startTime: '23:00', endDate: '2026-10-01', endTime: '23:00' });
+    for (const m of ['area', 'radius', 'cube'] as const) {
+      expect(defaultDatetimeLatest(m, latest)).toEqual({ startDate: '2026-10-01', startTime: '23:00', endDate: '2026-10-01', endTime: '23:00' });
+    }
+    // never before the extent start
+    expect(defaultDatetimeLatest('position', latest, '2026-10-01T12:00:00Z')).toMatchObject({ startDate: '2026-10-01', startTime: '12:00' });
+  });
+});
+
+describe('time range of area-type queries', () => {
+  const hourly = Array.from({ length: 10 }, (_, i) => `2026-11-09T${String(i).padStart(2, '0')}:00:00Z`);
+
+  const end = (start: string, src: Parameters<typeof rangeBounds>[1], move = true) => rangeBounds(start, src, move)?.end;
+  const H = 3600_000;
+
+  it('rangeBounds: the 6th available instant after the start, clamped to the last one', () => {
+    expect(rangeBounds('2026-11-09T00:00:00Z', { times: hourly })).toEqual({ start: '2026-11-09T00:00:00Z', end: '2026-11-09T06:00:00Z' });
+    expect(end('2026-11-09T02:00:00Z', { times: hourly })).toBe('2026-11-09T08:00:00Z');
+    expect(end('2026-11-09T07:00:00Z', { times: hourly })).toBe('2026-11-09T09:00:00Z'); // only 2 follow
+    // irregular list: counts instants, not time
+    const irregular = ['2026-11-09T00:00:00Z', '2026-11-12T00:00:00Z', '2026-11-20T00:00:00Z'];
+    expect(end('2026-11-09T00:00:00Z', { times: irregular })).toBe('2026-11-20T00:00:00Z');
+  });
+
+  it('rangeBounds: a start that is the last listed instant moves back to cover the last 7 instants', () => {
+    expect(rangeBounds('2026-11-09T09:00:00Z', { times: hourly })).toEqual({ start: '2026-11-09T03:00:00Z', end: '2026-11-09T09:00:00Z' });
+    // fewer than 7 instants: from the first one
+    const few = hourly.slice(0, 3);
+    expect(rangeBounds('2026-11-09T02:00:00Z', { times: few })).toEqual({ start: '2026-11-09T00:00:00Z', end: '2026-11-09T02:00:00Z' });
+    expect(rangeBounds('2026-11-09T00:00:00Z', { times: hourly.slice(0, 1) })).toEqual({ start: '2026-11-09T00:00:00Z', end: '2026-11-09T00:00:00Z' });
+    // not when the caller keeps the start (a start the user picked): just the end
+    expect(rangeBounds('2026-11-09T09:00:00Z', { times: hourly }, false)).toEqual({ start: '2026-11-09T09:00:00Z', end: '2026-11-09T09:00:00Z' });
+    // the 6th-after rule is unchanged one step before the last
+    expect(rangeBounds('2026-11-09T08:00:00Z', { times: hourly })).toEqual({ start: '2026-11-09T08:00:00Z', end: '2026-11-09T09:00:00Z' });
+  });
+
+  it('rangeBounds, capped list: start + 6 x step, clamped to the last instant', () => {
+    const last = '2026-11-09T12:00:00Z';
+    const step = { months: 0, ms: 3 * H };
+    expect(end('2026-11-09T00:00:00Z', { step, last })).toBe('2026-11-09T12:00:00Z'); // exactly 18 h would be 18:00: clamped
+    expect(end('2026-11-08T00:00:00Z', { step, last })).toBe('2026-11-08T18:00:00Z');
+    expect(end('2026-11-08T12:00:00Z', { step, last })).toBe('2026-11-09T06:00:00Z');
+    expect(end('2026-11-08T21:00:00Z', { step, last })).toBe('2026-11-09T12:00:00Z');
+    expect(end('2026-11-09T12:00:00Z', { step, last }, false)).toBe('2026-11-09T12:00:00Z');
+  });
+
+  it('rangeBounds, capped list: a start at the last instant moves back by 6 steps, not before the extent start', () => {
+    const last = '2026-11-09T12:00:00Z';
+    const step = { months: 0, ms: 3 * H };
+    expect(rangeBounds(last, { step, last })).toEqual({ start: '2026-11-08T18:00:00Z', end: last });
+    expect(rangeBounds(last, { step: null, last })).toEqual({ start: '2026-11-09T06:00:00Z', end: last }); // unknown step: 6 h
+    expect(rangeBounds(last, { step: { months: 1, ms: 0 }, last })).toEqual({ start: '2026-05-09T12:00:00Z', end: last });
+    expect(rangeBounds(last, { step, last, notBefore: '2026-11-09T00:00:00Z' })).toEqual({ start: '2026-11-09T00:00:00Z', end: last });
+    expect(rangeBounds(last, { step, last, notBefore: '2026-01-01T00:00:00Z' })?.start).toBe('2026-11-08T18:00:00Z');
+    expect(rangeBounds(last, { step, last }, false)).toEqual({ start: last, end: last });
+  });
+
+  it('rangeBounds, unknown list: start + 6 x step, or + 6 h; nothing to clamp to', () => {
+    expect(end('2026-11-09T00:00:00Z', { step: { months: 0, ms: 3 * H } })).toBe('2026-11-09T18:00:00Z');
+    expect(end('2026-11-09T00:00:00Z', { step: { months: 1, ms: 0 } })).toBe('2027-05-09T00:00:00Z');
+    expect(end('2026-11-09T00:00:00Z', {})).toBe('2026-11-09T06:00:00Z');
+    expect(end('2026-11-09T00:00:30Z', { step: { months: 0, ms: 1000 } })).toBe('2026-11-09T00:00:36Z');
+    expect(rangeBounds('nope', {})).toBeNull();
+  });
+
+  it('temporalStepAt: the period of the segment holding the start', () => {
+    const doc = { extent: { temporal: { values: ['2026-01-01T00:00:00Z/2026-01-02T00:00:00Z/PT1H', '2026-01-02T03:00:00Z/2026-01-05T00:00:00Z/PT3H', '2026-02-01T00:00:00Z'] } } };
+    expect(temporalStepAt(doc, '2026-01-01T05:00:00Z')).toEqual({ months: 0, ms: 3600_000 });
+    expect(temporalStepAt(doc, '2026-01-04T00:00:00Z')).toEqual({ months: 0, ms: 3 * 3600_000 });
+    expect(temporalStepAt(doc, '2026-02-01T00:00:00Z')).toBeNull(); // a plain instant has no step
+    expect(temporalStepAt(doc, '2027-01-01T00:00:00Z')).toBeNull();
+    expect(temporalStepAt({}, '2026-01-01T00:00:00Z')).toBeNull();
+  });
+
+  it('countSteps: inclusive, from the list or the step (hourly when unknown)', () => {
+    expect(countSteps('2026-11-09T00:00:00Z', '2026-11-09T06:00:00Z', hourly, null)).toBe(7);
+    expect(countSteps('2026-11-09T00:00:00Z', '2026-11-09T06:00:00Z', null, { months: 0, ms: 3 * 3600_000 })).toBe(3);
+    expect(countSteps('2026-11-09T00:00:00Z', '2026-11-09T06:00:00Z', null, null)).toBe(7);
+    expect(countSteps('2026-11-09T00:00:00Z', '2026-11-09T00:00:00Z', null, null)).toBe(1);
+    expect(countSteps('2026-11-09T06:00:00Z', '2026-11-09T00:00:00Z', hourly, null)).toBeNull();
+  });
+
+  it('queryAreaDeg2: box, polygon, circle', () => {
+    const box = [[10, 50], [15, 55]] as [number, number][];
+    expect(queryAreaDeg2('area', box, 'rectangle', null, 'degrees')).toBe(25);
+    expect(queryAreaDeg2('cube', box, 'rectangle', null, 'degrees')).toBe(25);
+    expect(queryAreaDeg2('area', [[0, 0], [4, 0], [0, 3]], 'polygon', null, 'degrees')).toBe(6);
+    expect(queryAreaDeg2('area', [[0, 0], [4, 0]], 'polygon', null, 'degrees')).toBeNull();
+    expect(queryAreaDeg2('radius', [[10, 50]], 'rectangle', 2, 'degrees')).toBeCloseTo(Math.PI * 4);
+    expect(queryAreaDeg2('radius', [[10, 50]], 'rectangle', 222, 'km')).toBeCloseTo(Math.PI * 4);
+    expect(queryAreaDeg2('radius', [[10, 50]], 'rectangle', null, 'km')).toBeNull();
+    expect(queryAreaDeg2('area', [[10, 50]], 'rectangle', null, 'degrees')).toBeNull();
+    expect(queryAreaDeg2('area', [[10, 50], [10, 55]], 'rectangle', null, 'degrees')).toBeNull(); // zero width
+    expect(queryAreaDeg2('position', [[10, 50]], 'rectangle', null, 'degrees')).toBeNull();
+  });
+
+  it('points and size estimate: points x steps x parameters x 0.24 KB', () => {
+    expect(knownGridSpacing('https://x/collections/operational-data?f=json')).toBe(0.1);
+    expect(knownGridSpacing('https://x/collections/other')).toBeNull();
+    expect(estimatePoints(25, 0.1)).toBe(2500);
+    const size = estimateSize(2500, 7, 2);
+    expect(size).toEqual({ steps: 7, bytes: 2500 * 7 * 2 * BYTES_PER_VALUE });
+    expect(describeEstimate(size)).toBe('about 7 steps, ~8.4 MB');
+    expect(describeEstimate(estimateSize(100_000, 25, 1))).toBe('about 25 steps, ~600 MB');
+    expect(describeEstimate(estimateSize(null, 7, 1))).toBe('about 7 steps, size unknown');
+    expect(describeEstimate(estimateSize(2500, 1, 0))).toBe('about 1 step, ~0.6 MB'); // no parameter yet counts as one
+    expect(describeEstimate(estimateSize(null, 7, 1), true)).toBe('about 7 steps (hourly assumed), size unknown');
+  });
+
+  it('learns the grid spacing from a response (composite or x/y axes)', () => {
+    const composite = { type: 'CoverageCollection', coverages: [{ domain: { axes: { composite: { values: new Array(2408).fill([0, 0]) } } } }] };
+    expect(responsePoints(composite)).toBe(2408);
+    expect(responsePoints({ domain: { axes: { x: { values: [1, 2, 3] }, y: { values: [1, 2] } } } })).toBe(6);
+    expect(responsePoints({ type: 'Coverage', domain: { axes: { t: { values: ['a'] } } } })).toBeNull();
+    expect(responsePoints(null)).toBeNull();
+    expect(spacingFromResponse(25, 2408)).toBeCloseTo(0.102, 3);
+    expect(spacingFromResponse(25, 4)).toBeNull(); // too few points to tell
   });
 });

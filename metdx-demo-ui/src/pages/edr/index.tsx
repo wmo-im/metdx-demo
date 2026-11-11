@@ -28,6 +28,9 @@ import {
   DEFAULT_WIDTH_UNITS,
   AREA_SHAPES,
   EDR_JOB,
+  RANGE_MODES,
+  RANGE_STEPS,
+  WARN_BYTES,
   EDR_MODES,
   HEIGHT_UNITS,
   IMPLEMENTED_MODES,
@@ -41,33 +44,52 @@ import {
   collectionBase,
   collectionJsonUrl,
   combineDatetime,
+  countSteps,
   defaultDatetime,
   defaultDatetimeFromTimes,
+  defaultDatetimeLatest,
+  describeEstimate,
   describeSteps,
+  estimatePoints,
+  estimateSize,
   describePoints,
   drawKindFor,
   geometryToPoints,
   instanceUrl,
   makeIso,
   instancesUrl,
+  knownGridSpacing,
   needsLevel,
   paramLabel,
   parseCollection,
   parseInstances,
   parseNumber,
   parseTemporal,
+  parseLatestTime,
   parseTemporalValues,
+  queryAreaDeg2,
   queryGeometry,
+  rangeBounds,
+  responsePoints,
+  spacingFromResponse,
+  splitIso,
+  temporalStepAt,
   timesOnDate,
   type AreaShape,
+  type DatetimeFields,
   type EdrCollectionInfo,
   type EdrMode,
+  type LatestTime,
+  type TimeStep,
   type TemporalExtent,
 } from '../../lib/edr';
 import type { Position } from '../../lib/types';
 import { ResultPanel, type FetchedResult } from './ResultPanel';
 
 type Status = { severity: 'error' | 'info' | 'success' | 'warning'; text: string } | null;
+
+/** `single`: one time step; `range`: the start and the following steps (area, radius, cube). */
+type TimeSteps = 'single' | 'range';
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -194,6 +216,9 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
   const [endDate, setEndDate] = useState('');
   const [endTime, setEndTime] = useState('');
   const [dtHint, setDtHint] = useState('');
+  const [timeSteps, setTimeSteps] = useState<TimeSteps>('single');
+  // The grid spacing (degrees) a previous response implied, for collections whose spacing is not known.
+  const [learnedSpacing, setLearnedSpacing] = useState<number | null>(null);
   const [radius, setRadius] = useState('');
   const [radiusUnits, setRadiusUnits] = useState(DEFAULT_RADIUS_UNITS);
   const [corridorWidth, setCorridorWidth] = useState('');
@@ -227,14 +252,21 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
   const effectiveInstance = useInstance && instanceId ? instanceId : null;
 
   // The extent the date fields default from (collection or instance), and whether the user has typed in them.
-  const [base, setBase] = useState<{ t: TemporalExtent; times: string[] | null } | null>(null);
+  const [base, setBase] = useState<{ t: TemporalExtent; times: string[] | null; latest: LatestTime | null; data: unknown } | null>(
+    null,
+  );
   const datesEdited = useRef(false);
+  // The end was typed / picked by the user: a "Range" then stops following the start.
+  const endEdited = useRef(false);
+  const rangeOn = timeSteps === 'range' && RANGE_MODES.includes(mode);
 
   // A new extent (collection load, instance switch) re-applies the defaults, dropping earlier edits.
   const applyTemporal = useCallback((t: TemporalExtent, label: string, data: unknown) => {
     // The offered instants (`values`), when listed in full; a capped (incomplete) list would hide valid times.
     const expanded = parseTemporalValues(data);
     const times = expanded && !expanded.capped ? expanded.times : null;
+    // Too many to list: default to the latest instants, computed without expanding the list.
+    const latest = expanded?.capped ? parseLatestTime(data) : null;
     const parts: string[] = [];
     if (t.start) parts.push(`from ${t.start.slice(0, 16)}`);
     if (t.end) parts.push(`to ${t.end.slice(0, 16)}`);
@@ -245,26 +277,85 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
       const steps = describeSteps(times);
       if (steps) hint += `${hint ? '. ' : ''}Steps: ${steps}`;
     }
+    if (latest) hint += `${hint ? '. ' : ''}Too many times to list; defaulting to the latest`;
     setDtHint(hint);
     datesEdited.current = false;
-    setBase({ t, times });
+    endEdited.current = false;
+    setBase({ t, times, latest, data });
   }, []);
 
+  /**
+   * The fields of a range starting at the given ones: 6 steps later (from the listed times, or the step at the
+   * start), clamped to the last available instant. With `moveStart`, a start that is already the last instant
+   * moves back so the range covers the last 7 instants.
+   */
+  const rangeFields = (date: string, time: string, moveStart: boolean): DatetimeFields | null => {
+    const start = makeIso(date, time);
+    if (!start || !base) return null;
+    const step: TimeStep | null = base.times ? null : temporalStepAt(base.data, start);
+    const b = rangeBounds(start, { times: base.times, step, last: base.latest?.last, notBefore: base.t.start }, moveStart);
+    if (!b) return null;
+    const s = splitIso(b.start);
+    const e = splitIso(b.end);
+    return { startDate: s.date, startTime: s.time, endDate: e.date, endTime: e.time };
+  };
+
   // Defaults per query type (a whole extent can be hundreds of MB): position = first step + 1 day (a time
-  // series), everything else = the first step only. Changing the mode re-applies them unless the user edited the dates.
+  // series), everything else = the first step only; with too many times to list (capped), the latest ones
+  // instead. Changing the mode re-applies them unless the user edited the dates.
   useEffect(() => {
     if (!base || datesEdited.current) return;
     // No temporal info at all (neither interval nor values): leave the fields empty, so no `datetime` is sent.
-    const d = base.times ? defaultDatetimeFromTimes(mode, base.times) : defaultDatetime(mode, base.t);
-    setStartDate(d?.startDate ?? '');
-    setStartTime(d?.startTime ?? '');
-    setEndDate(d?.endDate ?? '');
-    setEndTime(d?.endTime ?? '');
-  }, [base, mode]);
+    const d = base.times
+      ? defaultDatetimeFromTimes(mode, base.times)
+      : base.latest
+        ? defaultDatetimeLatest(mode, base.latest, base.t.start)
+        : defaultDatetime(mode, base.t);
+    const r = rangeOn && d ? (rangeFields(d.startDate, d.startTime, true) ?? d) : d;
+    setStartDate(r?.startDate ?? '');
+    setStartTime(r?.startTime ?? '');
+    setEndDate(r?.endDate ?? '');
+    setEndTime(r?.endTime ?? '');
+    // (rangeFields reads `base`, which is a dependency)
+  }, [base, mode, rangeOn]);
+
+  // The end of a range follows the start (until the user sets the end themselves).
+  useEffect(() => {
+    if (!rangeOn || endEdited.current) return;
+    // A start the user picked (the last instant too) stays where it is; only the end follows it.
+    const e = rangeFields(startDate, startTime, false);
+    if (!e) return;
+    setEndDate(e.endDate);
+    setEndTime(e.endTime);
+    // (only a new start moves the end)
+  }, [rangeOn, startDate, startTime]);
 
   const editDate = (set: (v: string) => void) => (e: { target: { value: string } }) => {
     datesEdited.current = true;
     set(e.target.value);
+  };
+  const editEnd = (set: (v: string) => void) => (e: { target: { value: string } }) => {
+    endEdited.current = true;
+    editDate(set)(e);
+  };
+
+  const chooseTimeSteps = (v: TimeSteps | null) => {
+    if (!v || v === timeSteps) return;
+    endEdited.current = false;
+    setTimeSteps(v);
+    if (v === 'single') {
+      setEndDate(startDate); // end = start
+      setEndTime(startTime);
+    } else {
+      // Range: from the start, moved back when it is the last instant (the effects above then set the end).
+      const r = rangeFields(startDate, startTime, true);
+      if (r) {
+        setStartDate(r.startDate);
+        setStartTime(r.startTime);
+        setEndDate(r.endDate);
+        setEndTime(r.endTime);
+      }
+    }
   };
 
   // With a list of available instants the fields are dropdowns: the times follow the chosen date, and the end
@@ -301,6 +392,7 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
     datesEdited.current = true;
     const onDate = timesOnDate(fromStart(times, startIso), date);
     if (!onDate.length) return;
+    endEdited.current = true;
     setEndDate(date);
     setEndTime(onDate.includes(endTime) ? endTime : onDate[0]);
   };
@@ -365,6 +457,25 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
   const radiusValue = parseNumber(radius);
   const widthValue = parseNumber(corridorWidth);
   const heightValue = parseNumber(corridorHeight);
+  const areaDeg2 = useMemo(
+    () => queryAreaDeg2(mode, points, areaShape, radiusValue, radiusUnits),
+    [mode, points, areaShape, radiusValue, radiusUnits],
+  );
+  const areaRef = useRef<number | null>(null);
+  areaRef.current = areaDeg2;
+  // "about N steps, ~X MB" of a Range: points (area / grid spacing) x steps x parameters x ~0.24 KB.
+  const estimate = useMemo(() => {
+    const s = rangeOn ? makeIso(startDate, startTime) : null;
+    if (!s || areaDeg2 == null) return null;
+    const times = base?.times ?? null;
+    const step = times ? null : temporalStepAt(base?.data, s);
+    const steps = countSteps(s, makeIso(endDate, endTime) ?? s, times, step);
+    if (!steps) return null;
+    const spacing = knownGridSpacing(collectionUrl) ?? learnedSpacing;
+    const size = estimateSize(spacing ? estimatePoints(areaDeg2, spacing) : null, steps, params.length);
+    return { size, text: describeEstimate(size, !times && !step) };
+  }, [rangeOn, startDate, startTime, endDate, endTime, areaDeg2, base, collectionUrl, learnedSpacing, params.length]);
+
   const url = useMemo(
     () =>
       buildEdrUrl({
@@ -490,6 +601,7 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
         return;
       }
     }
+    const areaAtFetch = target === builtUrl.current ? areaRef.current : null;
     setStatus({ severity: 'info', text: 'Fetching...' });
     setFetched(null);
     map.clearData();
@@ -521,6 +633,11 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
         },
       });
       if (!current()) return;
+      if (areaAtFetch != null) {
+        const n = responsePoints(data);
+        const sp = n != null ? spacingFromResponse(areaAtFetch, n) : null;
+        if (sp != null) setLearnedSpacing(sp);
+      }
       const text = JSON.stringify(data, null, 2);
       setFetched({ id: ++fetchSeq.current, data, text, filename: fileNameFor(target) });
       setStatus({ severity: 'success', text: `Response received (${text.length.toLocaleString()} chars)` });
@@ -810,9 +927,29 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
             ? 'Type dates (YYYY-MM-DD) to query a specific time or range.'
             : mode === 'position'
             ? 'Starts with the first available step and the following day. Edit the dates to query another range.'
+            : rangeOn
+            ? `Starts with the first available step and the ${RANGE_STEPS} steps that follow. Edit the dates to query another range.`
             : 'Starts with a single time (the first available step). Set a later end to query a range.'}
           {times ? ' Only available times can be chosen.' : ''}
         </Typography>
+        {RANGE_MODES.includes(mode) && (
+          <ToggleButtonGroup
+            exclusive
+            size="small"
+            value={timeSteps}
+            onChange={(_, v: TimeSteps | null) => chooseTimeSteps(v)}
+            aria-label="Time steps"
+            data-testid="edr-time-steps"
+            sx={{ mb: 1 }}
+          >
+            <ToggleButton value="single" aria-label="Single">
+              Single
+            </ToggleButton>
+            <ToggleButton value="range" aria-label="Range">
+              Range
+            </ToggleButton>
+          </ToggleButtonGroup>
+        )}
         {pick ? (
           <>
             <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
@@ -827,6 +964,7 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
                 options={pick.endTimes}
                 onChange={(t) => {
                   datesEdited.current = true;
+                  endEdited.current = true;
                   setEndTime(t);
                 }}
                 flex={1}
@@ -840,10 +978,21 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
               <TextField size="small" label="Start time" placeholder="HH:MM" value={startTime} onChange={editDate(setStartTime)} sx={{ flex: 1 }} />
             </Stack>
             <Stack direction="row" spacing={1}>
-              <TextField size="small" label="End date" placeholder="YYYY-MM-DD" value={endDate} onChange={editDate(setEndDate)} sx={{ flex: 2 }} />
-              <TextField size="small" label="End time" placeholder="HH:MM" value={endTime} onChange={editDate(setEndTime)} sx={{ flex: 1 }} />
+              <TextField size="small" label="End date" placeholder="YYYY-MM-DD" value={endDate} onChange={editEnd(setEndDate)} sx={{ flex: 2 }} />
+              <TextField size="small" label="End time" placeholder="HH:MM" value={endTime} onChange={editEnd(setEndTime)} sx={{ flex: 1 }} />
             </Stack>
           </>
+        )}
+        {estimate && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }} data-testid="edr-estimate">
+            Estimate: {estimate.text}
+          </Typography>
+        )}
+        {estimate && estimate.size.bytes != null && estimate.size.bytes > WARN_BYTES && (
+          <Alert severity="warning" sx={{ mt: 1 }} data-testid="edr-estimate-warning">
+            This is a large request (over {WARN_BYTES / 1e6} MB): it may be slow, and responses above{' '}
+            {MAX_RESPONSE_BYTES / 1024 / 1024} MB are refused. Use a smaller area, fewer steps or fewer parameters.
+          </Alert>
         )}
       </Section>
 

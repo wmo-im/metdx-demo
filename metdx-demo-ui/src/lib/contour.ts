@@ -256,6 +256,80 @@ export interface ContourOptions {
   maxPx?: number;
 }
 
+/** Bytes taken by the polygon coordinates of `set` (every vertex is a lon/lat pair of 8-byte numbers). */
+export function contourBytes(set: ContourSet | null): number {
+  if (!set) return 0;
+  let vertices = 0;
+  for (const band of set.bands) for (const poly of band.coordinates) for (const ring of poly) vertices += ring.length;
+  return vertices * 16;
+}
+
+/** Default limits of a {@link ContourCache}. */
+export const CONTOUR_CACHE_MAX_BYTES = 64 * 1024 * 1024;
+export const CONTOUR_CACHE_MAX_ENTRIES = 48;
+
+/**
+ * Least-recently-used cache of contour sets, bounded by the total polygon coordinate bytes ({@link contourBytes}) and
+ * by the number of entries. `null` (a field that cannot be contoured) is cached too, at no byte cost.
+ */
+export class ContourCache {
+  private readonly entries = new Map<string, { set: ContourSet | null; bytes: number }>();
+  private total = 0;
+
+  constructor(
+    readonly maxBytes = CONTOUR_CACHE_MAX_BYTES,
+    readonly maxEntries = CONTOUR_CACHE_MAX_ENTRIES,
+  ) {}
+
+  /** Number of entries. */
+  get size(): number {
+    return this.entries.size;
+  }
+
+  /** Sum of the entries' {@link contourBytes}. */
+  get bytes(): number {
+    return this.total;
+  }
+
+  has(key: string): boolean {
+    return this.entries.has(key);
+  }
+
+  /** The cached set (`null` is a cached "nothing to draw"), or `undefined` if absent. A hit becomes the most recently used. */
+  get(key: string): ContourSet | null | undefined {
+    const e = this.entries.get(key);
+    if (!e) return undefined;
+    this.entries.delete(key);
+    this.entries.set(key, e);
+    return e.set;
+  }
+
+  /** Store `set` as the most recently used and evict least recently used entries until the limits hold. A set larger than the byte budget on its own is not stored. */
+  set(key: string, set: ContourSet | null): void {
+    this.delete(key);
+    const bytes = contourBytes(set);
+    if (bytes > this.maxBytes) return;
+    this.entries.set(key, { set, bytes });
+    this.total += bytes;
+    while (this.entries.size > this.maxEntries || this.total > this.maxBytes) {
+      const oldest = this.entries.keys().next().value as string;
+      this.delete(oldest);
+    }
+  }
+
+  delete(key: string): void {
+    const e = this.entries.get(key);
+    if (!e) return;
+    this.total -= e.bytes;
+    this.entries.delete(key);
+  }
+
+  clear(): void {
+    this.entries.clear();
+    this.total = 0;
+  }
+}
+
 /**
  * Filled contours of `values` (one per point of `coords`) over the triangulation `tri`. `min`/`max` is the data range
  * that sets the band edges and colours. Returns `null` when there is nothing to draw (no triangles, no finite range).

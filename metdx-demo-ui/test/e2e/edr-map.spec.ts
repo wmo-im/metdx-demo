@@ -1,5 +1,6 @@
 // EDR results on the map (mock project): the live ECMWF samples served by mockFetch (`?mock=1`) for position, area
-// and trajectory (on both map engines, see engine.ts); param/time switching, clearing and a 40k-point performance run on routed synthetic CoverageJSON.
+// and trajectory (on both map engines, see engine.ts); param/time switching, the area time slider (range fetch, 25-step
+// performance), clearing and a 40k-point performance run on routed synthetic CoverageJSON.
 import type { Page } from '@playwright/test';
 import { dataPixels as scanPixels, expect, QUICK, findDataPixel as findPixel, settleMap, shotName, test, type EngineName } from './engine';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -317,6 +318,46 @@ test.describe('mock fixtures', () => {
 
     await panel.getByRole('button', { name: 'View JSON' }).click();
     await expect(page.getByRole('dialog').getByTestId('result-json')).toContainText('"type": "Coverage');
+  });
+
+  test('area with a time range: slider on the first step, a step change redraws the map', { tag: QUICK }, async ({ page }) => {
+    await blockTiles(page);
+    await openEdrMock(page, 'area');
+    await drawGeometry(page, 'area');
+    await page.getByTestId('edr-time-steps').getByRole('button', { name: 'Range', exact: true }).click();
+    await expect(page.getByTestId('edr-estimate')).toContainText('steps');
+    await expect(page.getByLabel('Request URL')).toHaveValue(/datetime=[^&]*\/[^&]*/);
+    await page.getByRole('button', { name: 'Fetch' }).click();
+
+    const panel = page.getByTestId('edr-result');
+    await expect(panel.getByTestId('edr-time')).toBeVisible();
+    await expect(panel.getByRole('slider', { name: 'Time' })).toBeVisible();
+    await expect(panel.getByTestId('edr-time-play')).toBeVisible();
+    await expectDrawn(page);
+    await expect(page.getByTestId('map')).toHaveAttribute('data-style', 'contours');
+    await expect(panel.getByTestId('edr-time-step')).toHaveText(/^Step 1\/\d+$/);
+    const steps = Number(/\/(\d+)$/.exec((await panel.getByTestId('edr-time-step').textContent()) ?? '')?.[1]);
+    expect(steps).toBeGreaterThan(1);
+    const firstLabel = (await panel.getByTestId('edr-time-label').textContent()) ?? '';
+
+    // the first step is drawn
+    await page.waitForTimeout(400);
+    const first = await dataPixels(page);
+    expect(first.total).toBeGreaterThan(2000);
+
+    // the slider (keyboard) moves to the next step and the map redraws it with other colours
+    await panel.getByRole('slider', { name: 'Time' }).focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(panel.getByTestId('edr-time-step')).toHaveText(`Step 2/${steps}`);
+    await expect(panel.getByTestId('edr-time-label')).not.toHaveText(firstLabel);
+    await expectDrawn(page);
+    await expect.poll(async () => (await dataPixels(page)).sig, { timeout: 5000 }).not.toBe(first.sig);
+    expect((await dataPixels(page)).total).toBeGreaterThan(2000);
+
+    // and back to the first step: the first picture again
+    await page.keyboard.press('Home');
+    await expect(panel.getByTestId('edr-time-step')).toHaveText(`Step 1/${steps}`);
+    await expect.poll(async () => (await dataPixels(page)).sig, { timeout: 5000 }).toBe(first.sig);
   });
 
   test('area with the basemap: screenshot', async ({ page }) => {
@@ -639,6 +680,119 @@ test.describe('param and time switching (synthetic, 1500 points x 4 times x 2 pa
 
     // the clicked point's series over the 4 time steps is charted
     await expect(panel.locator('svg').first()).toBeVisible();
+  });
+});
+
+/* ------------------------------------------------------ 25 steps x 2.4k points: slider */
+
+/**
+ * What polytope returns for an area over several steps: a CoverageCollection with one Coverage per step, all with
+ * the same `n`-point composite domain and the same `t` (the forecast date); the valid time is in `mars:metadata.step`.
+ */
+function syntheticSteps(n: number, nSteps: number, param: SynthParam) {
+  const cols = Math.ceil(Math.sqrt(n));
+  const spacing = 5 / cols;
+  const composite: number[][] = [];
+  for (let i = 0; i < n; i++) composite.push([Number((45 + Math.floor(i / cols) * spacing).toFixed(5)), Number((5 + (i % cols) * spacing).toFixed(5)), 0]);
+  const coverages = Array.from({ length: nSteps }, (_, s) => {
+    const values: number[] = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const lat = 45 + Math.floor(i / cols) * spacing;
+      const lon = 5 + (i % cols) * spacing;
+      values[i] = Number((param.base + param.amp * Math.sin(lon * 1.3 + s * 0.5) * Math.cos(lat * 1.1 - s * 0.3) + s * 0.2).toFixed(3));
+    }
+    return {
+      'mars:metadata': { 'Forecast date': '2026-11-09T00:00:00Z', step: 24 + s },
+      type: 'Coverage',
+      domain: {
+        type: 'Domain',
+        axes: { t: { values: ['2026-11-09T00:00:00Z'] }, composite: { dataType: 'tuple', coordinates: ['latitude', 'longitude', 'levelist'], values: composite } },
+      },
+      ranges: { [param.key]: { type: 'NdArray', dataType: 'float', shape: [n], axisNames: [param.key], values } },
+    };
+  });
+  return {
+    type: 'CoverageCollection',
+    domainType: 'MultiPoint',
+    coverages,
+    parameters: {
+      [param.key]: {
+        type: 'Parameter',
+        description: { en: `Synthetic ${param.key}` },
+        unit: { symbol: param.unit },
+        observedProperty: { id: param.key, label: { en: `Synthetic ${param.key}` } },
+      },
+    },
+  };
+}
+
+test.describe('time slider performance (25 steps x 2400 points)', () => {
+  test('step switches < 150 ms each, Play runs without long tasks > 200 ms', async ({ page }) => {
+    test.setTimeout(120_000);
+    const N = 2400;
+    const STEPS = 25;
+    await blockTiles(page);
+    await routeProxy(page, () => syntheticSteps(N, STEPS, PARAMS[0]));
+    await openEdrRouted(page, 'area');
+    await drawGeometry(page, 'area');
+    await page.getByRole('button', { name: 'Fetch' }).click();
+
+    const panel = page.getByTestId('edr-result');
+    const stepLabel = panel.getByTestId('edr-time-step');
+    await expect(stepLabel).toHaveText(`Step 1/${STEPS}`);
+    await expectDrawn(page);
+    await expect(page.getByTestId('map')).toHaveAttribute('data-style', 'contours');
+    await page.waitForTimeout(500);
+    expect((await dataPixels(page)).total, 'first step drawn').toBeGreaterThan(20_000);
+
+    // every step in turn with the keyboard: keydown -> drawn + painted (the next steps are prepared while idle)
+    const slider = panel.getByRole('slider', { name: 'Time' });
+    await slider.focus();
+    const switches: number[] = [];
+    for (let s = 1; s < STEPS; s++) {
+      await armPaintTimer(page, 'keydown');
+      await page.keyboard.press('ArrowRight');
+      switches.push(Math.round(await paintMs(page)));
+      await expect(stepLabel).toHaveText(`Step ${s + 1}/${STEPS}`);
+      await page.waitForTimeout(150);
+    }
+
+    // Play for about 3 s (one step every 500 ms)
+    await page.keyboard.press('Home');
+    await expect(stepLabel).toHaveText(`Step 1/${STEPS}`);
+    await page.waitForTimeout(300);
+    await startProbe(page);
+    await panel.getByTestId('edr-time-play').click();
+    await expect(panel.getByTestId('edr-time-play')).toHaveAttribute('aria-label', 'Pause');
+    const seen = new Set<string>();
+    const t0 = Date.now();
+    while (Date.now() - t0 < 3000) {
+      seen.add((await stepLabel.textContent()) ?? '');
+      await page.waitForTimeout(100);
+    }
+    const probe = await stopProbe(page);
+    await panel.getByTestId('edr-time-play').click(); // Pause
+    await expect(panel.getByTestId('edr-time-play')).toHaveAttribute('aria-label', 'Play');
+    expect((await dataPixels(page)).total, 'still drawn after play').toBeGreaterThan(20_000);
+
+    const sorted = [...switches].sort((a, b) => a - b);
+    const report = {
+      points: N,
+      steps: STEPS,
+      switchesMs: switches,
+      switchMaxMs: sorted[sorted.length - 1],
+      switchMedianMs: sorted[Math.floor(sorted.length / 2)],
+      playStepsSeen: seen.size,
+      playLongTaskMs: Math.round(probe.longTask),
+      playMaxTimerGapMs: Math.round(probe.maxGap),
+    };
+    console.log(`steps perf (${ENGINE}): ${JSON.stringify({ ...report, switchesMs: undefined })}`);
+    writeFileSync(join(SCREENS, ENGINE === 'ol' ? 'perf-steps.json' : `perf-steps-${ENGINE}.json`), JSON.stringify(report, null, 2));
+    test.info().annotations.push({ type: 'perf', description: JSON.stringify(report) });
+
+    for (const [i, ms] of switches.entries()) expect(ms, `switch to step ${i + 2}`).toBeLessThan(150);
+    expect(seen.size, 'Play advanced through several steps').toBeGreaterThanOrEqual(4);
+    expect(probe.longTask, 'longest long task while playing').toBeLessThan(200);
   });
 });
 
