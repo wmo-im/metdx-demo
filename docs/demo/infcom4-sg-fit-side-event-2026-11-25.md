@@ -360,13 +360,11 @@ chunk      init_time       lead_h  url                                          
     - Select 10 years of data in the "Datetime" panel - e.g., 2016-01-01 00:00 to 2025-12-31 23:59
     - Click "Fetch". Ten years of hourly data (about 87,600 values) comes back in around ten seconds, and you can see the annual temperature cycle
 16. Head back to the catalogue search page and select the "Met Office Global Deterministic" dataset: the Met Office's global 10 km forecast, four runs a day
-    - **==TODO==** _the WCMP2 record doesn't link to the OGC API – EDR endpoint yet; until it does, use the "Met Office Global Model forecast via OGC EDR (ICE demo, Met Office Labs)" record_
     - _Behind this: the Met Office publishes CF-netCDF files to Amazon S3 (the AWS open data registry). They stay there: an Icechunk manifest records where each chunk sits inside each file, so the EDR server reads only the byte ranges a query needs._
     - A short explainer for the data pipeline:
 
     ![Met Office Global Deterministic pipeline: from CF-netCDF on Amazon S3 to OGC API – EDR](images/metoffice-global-edr-pipeline.png)
 
-    - **==TODO==** _confirm the server side with the Met Office: the diagram shows pygeoapi under gunicorn on Amazon EC2, inferred from the endpoint's responses_
 17. **EDR:**
     - Zoom into the British Isles
     - Open the EDR query builder: the query types are "POSITION", "AREA", "RADIUS" and "CUBE" (plus `instances`, its model runs). Again, that's this endpoint's `data_queries` metadata.
