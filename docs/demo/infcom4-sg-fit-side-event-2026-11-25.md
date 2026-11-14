@@ -2,6 +2,7 @@
 
 ## Contents
 
+- [Introduction](#introduction)
 - [Step 1: Find the dataset](#step-1-find-the-dataset)
 - [Step 2: The data is a pile of GRIB files](#step-2-the-data-is-a-pile-of-grib-files)
 - [Step 3: Which file do I actually need?](#step-3-which-file-do-i-actually-need)
@@ -12,6 +13,13 @@
 - [Step 8: For the rest of us, a Web API](#step-8-for-the-rest-of-us-a-web-api)
 - [And Beyond: integration with AI agents](#and-beyond-integration-with-ai-agents)
   
+## Introduction  
+
+- We've prepared a demonstration to help illustrate how these "least disruptive" approaches - Web services and ARCO data - build on top of WIS2
+- In the interests of time, we'll move through the demo quite quickly
+- There's more to see at the WIS2 booth just outside - more examples, and more time to talk through how these demos work
+- Please do stop by and talk to \[Jeremy, Tom, Secretariat colleagues\]
+
 ## Step 1: Find the dataset  
 ![slide-1-step-1.png](images/slide-1-step-1.png)  
 1. Setup:   
