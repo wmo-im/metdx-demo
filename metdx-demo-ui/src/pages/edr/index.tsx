@@ -64,6 +64,7 @@ import {
   parseInstances,
   parseNumber,
   parseTemporal,
+  parseVerticalExtent,
   parseLatestTime,
   parseTemporalValues,
   queryAreaDeg2,
@@ -77,11 +78,13 @@ import {
   type AreaShape,
   type DatetimeFields,
   type EdrCollectionInfo,
+  type VerticalExtent,
   type EdrMode,
   type LatestTime,
   type TimeStep,
   type TemporalExtent,
 } from '../../lib/edr';
+import { coverageLevels } from '../../lib/covjson';
 import type { Position } from '../../lib/types';
 import { PickField } from '../../shell/PickField';
 import { ResultPanel, type FetchedResult } from './ResultPanel';
@@ -163,6 +166,46 @@ const fromStart = (times: string[], startIso: string): string[] => {
   return Number.isNaN(s) ? times : times.filter((t) => Date.parse(t) >= s);
 };
 
+interface LevelChoice {
+  source: 'extent' | 'response' | 'default';
+  values: string[];
+  label: string;
+  /** Unit / reference system, when known. */
+  unit: string | null;
+  /** ECMWF level parameters are selected without any server-reported level: a level must be chosen. */
+  required: boolean;
+}
+
+/** The last path segment of a URI-like `vrs`, else the text itself. */
+const shortVrs = (vrs: string): string => vrs.split(/[/#]/).filter(Boolean).pop() ?? vrs;
+
+/** Where the "Vertical level" chooser gets its levels, in priority order; `null` = no chooser. */
+function levelChoices(
+  instance: VerticalExtent | null,
+  collection: VerticalExtent | null,
+  learned: { name: string; values: string[] } | null,
+  params: readonly string[],
+): LevelChoice | null {
+  const ext = instance?.values.length ? instance : collection?.values.length ? collection : null;
+  if (ext) {
+    const unit = ext.vrs ? shortVrs(ext.vrs) : null;
+    return { source: 'extent', values: ext.values, label: unit ? `Vertical level (${unit})` : 'Vertical level', unit, required: false };
+  }
+  if (learned) {
+    return { source: 'response', values: learned.values, label: `Vertical level (${learned.name})`, unit: learned.name, required: false };
+  }
+  if (needsLevel(params)) {
+    return { source: 'default', values: [...COMMON_LEVELS], label: 'Pressure level (hPa)', unit: 'hPa', required: true };
+  }
+  return null;
+}
+
+/** Whether a query URL carries a `z` parameter (also when it was typed by hand into the bar). */
+function queryHasZ(target: string): boolean {
+  const q = target.indexOf('?');
+  return q >= 0 && /(^|&)z=/.test(target.slice(q + 1).split('#')[0]);
+}
+
 function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
   const { id: recordId } = useParams();
   const map = useMap();
@@ -183,6 +226,11 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
   const [useInstance, setUseInstance] = useState(false);
   const [instanceId, setInstanceId] = useState('');
   const [level, setLevel] = useState('');
+  // Level lists: `extent.vertical` of the collection / selected instance, and what the last response's z axis showed.
+  // (All of it is per collection: the builder is remounted when the collection changes.)
+  const [collectionVertical, setCollectionVertical] = useState<VerticalExtent | null>(null);
+  const [instanceVertical, setInstanceVertical] = useState<VerticalExtent | null>(null);
+  const [learnedLevels, setLearnedLevels] = useState<{ name: string; values: string[] } | null>(null);
   const [startDate, setStartDate] = useState('');
   const [startTime, setStartTime] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -378,6 +426,7 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
         const c = parseCollection(data);
         collectionData.current = data;
         setInfo(c);
+        setCollectionVertical(parseVerticalExtent(data));
         const avail = availableModes(c.modes);
         setMode((m) => (avail.length && !avail.includes(m) ? avail[0] : m));
         map.showExtent(c.bbox);
@@ -404,6 +453,7 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
   const collectionData = useRef<unknown>(null);
   const hadInstance = useRef(false);
   useEffect(() => {
+    setInstanceVertical(null);
     if (!effectiveInstance) {
       if (hadInstance.current) {
         hadInstance.current = false;
@@ -415,7 +465,11 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
     let live = true;
     setDtHint('Loading forecast range...');
     fetchJson(instanceUrl(collectionUrl, effectiveInstance)).then(
-      (data) => live && applyTemporal(parseTemporal(data), 'Valid range', data),
+      (data) => {
+        if (!live) return;
+        setInstanceVertical(parseVerticalExtent(data));
+        applyTemporal(parseTemporal(data), 'Valid range', data);
+      },
       (e) => live && setDtHint(`Could not load instance details: ${errorMessage(e)}`),
     );
     return () => {
@@ -448,6 +502,21 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
     return { size, text: describeEstimate(size, !times && !step) };
   }, [rangeOn, startDate, startTime, endDate, endTime, areaDeg2, base, collectionUrl, learnedSpacing, params.length]);
 
+  // Levels to offer: the instance's / collection's `extent.vertical` values, else the z axis of the last response,
+  // else (ECMWF level parameters only) the common pressure levels, which are then required.
+  const levelChoice = useMemo(() => levelChoices(instanceVertical, collectionVertical, learnedLevels, params), [
+    instanceVertical,
+    collectionVertical,
+    learnedLevels,
+    params,
+  ]);
+  // A level only counts while the chooser is shown (a level picked for `t` must not leak into a `2t` query).
+  const activeLevel = levelChoice && levelChoice.values.includes(level) ? level : '';
+  // A level that the (new) list does not offer any more is dropped.
+  useEffect(() => {
+    if (levelChoice && level && !levelChoice.values.includes(level)) setLevel('');
+  }, [levelChoice, level]);
+
   const url = useMemo(
     () =>
       buildEdrUrl({
@@ -458,7 +527,7 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
         params,
         datetime,
         instanceId: effectiveInstance,
-        level,
+        level: activeLevel,
         radius: radiusValue,
         radiusUnits,
         corridorWidth: widthValue,
@@ -474,7 +543,7 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
       params,
       datetime,
       effectiveInstance,
-      level,
+      activeLevel,
       radiusValue,
       radiusUnits,
       widthValue,
@@ -552,20 +621,21 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
     setParams((cur) => (cur.includes(id) ? cur.filter((p) => p !== id) : [...cur, id]));
 
   const levelParams = params.filter((p) => LEVEL_PARAMS.has(p));
+  const levelRequired = levelChoice?.required === true;
 
   // The bar's Fetch: validate selections only when the URL is the one we built (hand-edited URLs run as typed).
   const builtUrl = useRef<string | null>(url);
   builtUrl.current = url;
-  const paramsRef = useRef({ params, level });
-  paramsRef.current = { params, level };
+  const paramsRef = useRef({ params, level: activeLevel, levelRequired });
+  paramsRef.current = { params, level: activeLevel, levelRequired };
   useRegisterFetch(async (target) => {
     if (target === builtUrl.current) {
-      const { params: ps, level: lv } = paramsRef.current;
+      const { params: ps, level: lv, levelRequired: req } = paramsRef.current;
       if (!ps.length) {
         setStatus({ severity: 'error', text: 'Select at least one parameter first' });
         return;
       }
-      if (needsLevel(ps) && !lv) {
+      if (req && !lv) {
         setStatus({
           severity: 'error',
           text: `Select a pressure level for ${ps.filter((p) => LEVEL_PARAMS.has(p)).join(', ')} before querying`,
@@ -611,6 +681,11 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
         if (sp != null) setLearnedSpacing(sp);
       }
       const text = JSON.stringify(data, null, 2);
+      // A response teaches the chooser what the server has only when its z axis lists 2+ levels and the query did not
+      // ask for particular levels (`z=`): a single level (a surface field's `levelist: 0`, a `z=`-filtered answer) says
+      // nothing about what else exists and would replace the ECMWF fallback list. Never shrinks a longer learned list.
+      const lv = queryHasZ(target) ? null : coverageLevels(data);
+      if (lv && lv.values.length >= 2) setLearnedLevels((prev) => (!prev || lv.values.length > prev.values.length ? lv : prev));
       setFetched({ id: ++fetchSeq.current, data, text, filename: fileNameFor(target) });
       setStatus({ severity: 'success', text: `Response received (${text.length.toLocaleString()} chars)` });
     } catch (e) {
@@ -868,20 +943,32 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
         </Stack>
       </Section>
 
-      {levelParams.length > 0 && (
+      {levelChoice && (
         <Section title="Vertical level">
-          <Typography variant="caption" color={level ? 'text.secondary' : 'warning.main'} sx={{ display: 'block', mb: 1 }}>
-            {level
-              ? `Querying ${levelParams.join(', ')} at ${level} hPa`
-              : `⚠ ${levelParams.join(', ')} require a pressure level — select one to query them.`}
+          <Typography variant="caption" color={activeLevel || !levelRequired ? 'text.secondary' : 'warning.main'} sx={{ display: 'block', mb: 1 }}>
+            {levelRequired
+              ? activeLevel
+                ? `Querying ${levelParams.join(', ')} at ${activeLevel} hPa`
+                : `⚠ ${levelParams.join(', ')} require a pressure level — select one to query them.`
+              : activeLevel
+                ? `Querying at level ${activeLevel}${levelChoice.unit ? ` (${levelChoice.unit})` : ''}`
+                : `All levels${levelChoice.source === 'response' ? ' (levels taken from the last response)' : ''}`}
           </Typography>
-          <TextField select size="small" label="Pressure level (hPa)" value={level} onChange={(e) => setLevel(e.target.value)} sx={{ minWidth: 180 }}>
+          <TextField
+            select
+            size="small"
+            label={levelChoice.label}
+            value={activeLevel}
+            onChange={(e) => setLevel(e.target.value)}
+            sx={{ minWidth: 180 }}
+            slotProps={{ select: { displayEmpty: true } }}
+          >
             <MenuItem value="">
-              <em>None</em>
+              <em>{levelRequired ? 'None' : 'All levels'}</em>
             </MenuItem>
-            {COMMON_LEVELS.map((l) => (
+            {levelChoice.values.map((l) => (
               <MenuItem key={l} value={l}>
-                {l} hPa
+                {levelRequired ? `${l} hPa` : l}
               </MenuItem>
             ))}
           </TextField>

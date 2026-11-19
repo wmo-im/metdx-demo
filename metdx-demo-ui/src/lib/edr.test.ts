@@ -37,6 +37,7 @@ import {
   parseInstances,
   parseNumber,
   parseTemporal,
+  parseVerticalExtent,
   parseTimeSeries,
   paramLabel,
   parseTemporalValues,
@@ -69,14 +70,21 @@ describe('buildEdrUrl matches the Flet output', () => {
     );
   });
 
-  it('position with instance and level (z only for level parameters)', () => {
+  it('position with instance and level', () => {
     expect(
       buildEdrUrl(q({ points: [[10.5, 50.123]], params: ['t', '2t'], datetime: DT, instanceId: INST, level: '850' })),
     ).toBe(
       `${COL}/instances/${INST}/position?coords=POINT(10.5 50.123)&parameter-name=t,2t&z=850&datetime=${DT}&f=json`,
     );
+    // z is sent whenever a level is chosen, also for parameters that are not ECMWF level parameters
     expect(buildEdrUrl(q({ points: [[10, 50]], params: ['2t'], level: '850' }))).toBe(
-      `${COL}/position?coords=POINT(10.0 50.0)&parameter-name=2t&f=json`,
+      `${COL}/position?coords=POINT(10.0 50.0)&parameter-name=2t&z=850&f=json`,
+    );
+    expect(buildEdrUrl(q({ points: [[10, 50]], params: ['air_temperature'], level: '85000' }))).toBe(
+      `${COL}/position?coords=POINT(10.0 50.0)&parameter-name=air_temperature&z=85000&f=json`,
+    );
+    expect(buildEdrUrl(q({ points: [[10, 50]], params: ['air_temperature'], level: '' }))).toBe(
+      `${COL}/position?coords=POINT(10.0 50.0)&parameter-name=air_temperature&f=json`,
     );
   });
 
@@ -393,6 +401,21 @@ describe('metadata parsing (fixtures)', () => {
   it('unit symbol forms', () => {
     const c = parseCollection({ parameter_names: { a: { unit: { symbol: { value: 'K' } } }, b: { unit: { symbol: 'm' } } } });
     expect(c.params.map((p) => p.unit)).toEqual(['K', 'm']);
+  });
+  it('parseVerticalExtent reads values, interval and vrs from extent / extents', () => {
+    const vertical = { interval: [[1000, 10]], values: [1000, '850', 500], vrs: 'http://www.opengis.net/def/crs/EPSG/0/5715' };
+    const want = { values: ['1000', '850', '500'], interval: [1000, 10], vrs: vertical.vrs };
+    expect(parseVerticalExtent({ extent: { vertical } })).toEqual(want);
+    expect(parseVerticalExtent({ extents: { vertical } })).toEqual(want);
+    expect(parseVerticalExtent({ extent: { vertical: { interval: [[0, 100]] } } })).toEqual({ values: [], interval: [0, 100], vrs: null });
+    expect(parseVerticalExtent({ extent: { vertical: { values: ['R3/0/25'] } } })?.values).toEqual(['0', '25', '50']);
+    expect(parseVerticalExtent({ extent: { vertical: { interval: [['a', null]] } } })?.interval).toBeNull();
+  });
+  it('parseVerticalExtent is null without a vertical extent', () => {
+    expect(parseVerticalExtent({})).toBeNull();
+    expect(parseVerticalExtent(null)).toBeNull();
+    expect(parseVerticalExtent({ extent: { temporal: { interval: [['a', 'b']] } } })).toBeNull();
+    expect(parseVerticalExtent(collection)).toBeNull();
   });
   it('parseInstances / parseTemporal', () => {
     expect(parseInstances(instances)).toEqual(['2026-10-18T12:00:00Z', '2026-10-19T00:00:00Z']);

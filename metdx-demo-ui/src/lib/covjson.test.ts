@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { CovJsonError, normaliseTime, parseCoverageJson, pointSeries } from './covjson';
+import { CovJsonError, coverageLevels, normaliseTime, parseCoverageJson, pointSeries } from './covjson';
 import { MAX_GRID_CELLS, MAX_POINTS, TooLargeToDraw, isGridSpec, type GridSpec } from './covjsonTypes';
+import metOfficePressure from '../../test/fixtures/edr/metoffice-pressure-position.json';
 import mscPosition from '../../test/fixtures/edr/msc-position.json';
 import livePosition from '../../test/fixtures/edr/live-position.json';
 import liveArea from '../../test/fixtures/edr/live-area.json';
@@ -618,5 +619,93 @@ describe('per-time coverages merged into one layer', () => {
     );
     expect(l.times).toEqual(['2026-01-01T00:00:00Z', '2026-01-01T01:00:00Z']);
     expect((l.coords as Float64Array).length).toBe(4 * 2);
+  });
+});
+
+describe('vertical axis detection', () => {
+  it('Met Office point series with a `pressure` axis parses with 37 levels', () => {
+    const l = parseCoverageJson(metOfficePressure);
+    expect(l.kind).toBe('points');
+    expect(l.levels).toHaveLength(37);
+    expect(l.levels[0]).toBe(100000);
+    expect(l.levels[36]).toBe(40);
+    expect(l.times).toHaveLength(13);
+    expect(l.levelIndex).toBe(0);
+    // range axisNames [t, pressure, y, x]: t index 1, pressure index 0 → flat index 1 * 37
+    expect(l.values('air_temperature', 1)[0]).toBe(284.3125);
+    expect(parseCoverageJson(metOfficePressure, { levelIndex: 5 }).values('air_temperature', 0)[0]).toBeCloseTo(
+      (metOfficePressure.ranges.air_temperature.values as number[])[5],
+      6,
+    );
+    expect(pointSeries(l, 0, 'air_temperature')).toHaveLength(13);
+  });
+
+  it('coverageLevels reports the z axis as the server sent it', () => {
+    expect(coverageLevels(metOfficePressure)).toEqual({
+      name: 'pressure',
+      values: expect.arrayContaining(['100000', '97500', '40']),
+    });
+    expect(coverageLevels(metOfficePressure)?.values).toHaveLength(37);
+    expect(coverageLevels(mscPosition)).toBeNull();
+    expect(coverageLevels(null)).toBeNull();
+    expect(coverageLevels({ type: 'Coverage' })).toBeNull();
+  });
+
+  /** A point series whose vertical axis has a name the parser does not know. */
+  const withAxis = (name: string, system: Record<string, unknown>, values: unknown[] = [850, 500]) => ({
+    type: 'Coverage',
+    domain: {
+      type: 'Domain',
+      domainType: 'PointSeries',
+      axes: { x: { values: [10] }, y: { values: [50] }, t: { values: ['2026-01-01T00:00:00Z'] }, [name]: { values } },
+      referencing: [
+        { coordinates: ['x', 'y'], system: { type: 'GeographicCRS' } },
+        { coordinates: ['t'], system: { type: 'TemporalRS' } },
+        { coordinates: [name], system },
+      ],
+    },
+    ranges: { v: { type: 'NdArray', dataType: 'float', axisNames: ['t', name, 'y', 'x'], shape: [1, values.length, 1, 1], values: values.map((_, i) => i + 1) } },
+  });
+
+  it('an unknown axis name in a vertical / identifier reference system is the z axis', () => {
+    for (const system of [{ type: 'IdentifierRS', id: 'whatever' }, { type: 'VerticalCRS' }]) {
+      const l = parseCoverageJson(withAxis('mylevel', system));
+      expect(l.levels).toEqual([850, 500]);
+      expect(l.values('v', 0)[0]).toBe(1);
+      expect(parseCoverageJson(withAxis('mylevel', system), { levelIndex: 1 }).values('v', 0)[0]).toBe(2);
+    }
+  });
+
+  it('a compact numeric (start/stop/num) axis in a vertical reference system is the z axis, expanded lazily', () => {
+    const compact = (axis: Record<string, unknown>) => {
+      const c = withAxis('mylevel', { type: 'VerticalCRS' });
+      (c.domain.axes as Record<string, unknown>).mylevel = axis;
+      return c;
+    };
+    const c = compact({ start: 850, stop: 500, num: 2 });
+    const l = parseCoverageJson(c);
+    expect(l.levels).toEqual([850, 500]);
+    expect(parseCoverageJson(c, { levelIndex: 1 }).values('v', 0)[0]).toBe(2);
+    expect(coverageLevels(c)).toEqual({ name: 'mylevel', values: ['850', '500'] });
+    // a single-level compact axis
+    expect(coverageLevels(compact({ start: 700, stop: 700, num: 1 }))?.values).toEqual(['700']);
+    // too many levels: not drawn, not offered, and never expanded
+    const huge = compact({ start: 0, stop: 1, num: 1e9 });
+    expect(() => parseCoverageJson(huge)).toThrow(TooLargeToDraw);
+    expect(coverageLevels(huge)).toBeNull();
+    // a non-numeric compact axis is not a level
+    expect(coverageLevels(compact({ start: 'a', stop: 'b', num: 2 }))).toBeNull();
+  });
+
+  it('an unknown axis that is geographic / temporal / non-numeric, or a second z, is not taken as z', () => {
+    // no vertical reference system: the range cannot be matched to the domain any more
+    expect(() => parseCoverageJson(withAxis('mylevel', { type: 'GeographicCRS' }))).toThrow(CovJsonError);
+    // string members (e.g. an ensemble) are not levels
+    expect(() => parseCoverageJson(withAxis('member', { type: 'IdentifierRS' }, ['a', 'b']))).toThrow(CovJsonError);
+    // a known z name wins: the unknown axis is ignored
+    const both = withAxis('pressure', { type: 'IdentifierRS' });
+    (both.domain.axes as Record<string, unknown>).mylevel = { values: [1, 2, 3] };
+    (both.domain.referencing as unknown[]).push({ coordinates: ['mylevel'], system: { type: 'IdentifierRS' } });
+    expect(parseCoverageJson(both).levels).toEqual([850, 500]);
   });
 });

@@ -58,6 +58,14 @@ const NAME_TO_CANON: Record<string, Canon> = {
   level: 'z',
   levelist: 'z',
   height: 'z',
+  pressure: 'z',
+  pressure_level: 'z',
+  isobaric: 'z',
+  plev: 'z',
+  depth: 'z',
+  altitude: 'z',
+  elevation: 'z',
+  vertical: 'z',
   t: 't',
   time: 't',
 };
@@ -97,23 +105,39 @@ function expandAxis(a: Json): unknown[] {
   return out;
 }
 
-/** Collect the domain's axes by canonical name. */
-function readAxes(domain: Json): { axes: Partial<Record<Canon, Axis>>; keyToCanon: Map<string, Canon> } {
+/** Reference system types that are not vertical: an axis they cover is x, y or t, never z. */
+const NON_VERTICAL_SYSTEMS = new Set(['GeographicCRS', 'ProjectedCRS', 'TemporalRS']);
+
+/**
+ * Keys of axes that `referencing` places in a vertical-like system (`VerticalCRS`, `IdentifierRS`, ...): everything
+ * that is not geographic, projected or temporal. Used to recognise a z axis with a name {@link NAME_TO_CANON} lacks.
+ */
+function verticalKeys(referencing: unknown): Set<string> {
+  const out = new Set<string>();
+  if (!Array.isArray(referencing)) return out;
+  for (const r of referencing as Json[]) {
+    const type = r?.system?.type;
+    if (typeof type !== 'string' || NON_VERTICAL_SYSTEMS.has(type) || !Array.isArray(r?.coordinates)) continue;
+    for (const k of r.coordinates) out.add(String(k));
+  }
+  return out;
+}
+
+/** Collect the domain's axes by canonical name. `referencing` (when the domain has none) is looked up on the collection. */
+function readAxes(
+  domain: Json,
+  fallbackReferencing?: unknown,
+): { axes: Partial<Record<Canon, Axis>>; keyToCanon: Map<string, Canon> } {
   const raw = domain?.axes;
   if (!raw || typeof raw !== 'object') throw new CovJsonError('Coverage has no domain axes');
   const axes: Partial<Record<Canon, Axis>> = {};
   const keyToCanon = new Map<string, Canon>();
-  for (const [key, a] of Object.entries<Json>(raw)) {
-    if (!a || typeof a !== 'object') continue;
-    const isComposite = Array.isArray(a.values) && (a.dataType === 'tuple' || Array.isArray(a.coordinates));
-    if (a.dataType === 'polygon') throw new CovJsonError('Polygon axes are not supported');
-    const c: Canon | undefined = isComposite ? 'c' : canonName(key);
-    if (!c || axes[c]) continue; // ignore unknown / duplicate axes
-    const length = axisLength(key, a);
+  const vertical = verticalKeys(domain.referencing ?? fallbackReferencing);
+  const add = (key: string, a: Json, c: Canon, isComposite: boolean): void => {
     let cache: unknown[] | undefined;
     const axis: Axis = {
       key,
-      length,
+      length: axisLength(key, a),
       get values() {
         return (cache ??= expandAxis(a));
       },
@@ -124,6 +148,32 @@ function readAxes(domain: Json): { axes: Partial<Record<Canon, Axis>>; keyToCano
     }
     axes[c] = axis;
     keyToCanon.set(key, c);
+  };
+  const unnamed: string[] = []; // unknown names that the referencing puts in a vertical system
+  for (const [key, a] of Object.entries<Json>(raw)) {
+    if (!a || typeof a !== 'object') continue;
+    const isComposite = Array.isArray(a.values) && (a.dataType === 'tuple' || Array.isArray(a.coordinates));
+    if (a.dataType === 'polygon') throw new CovJsonError('Polygon axes are not supported');
+    const c: Canon | undefined = isComposite ? 'c' : canonName(key);
+    if (!c) {
+      if (vertical.has(key)) unnamed.push(key);
+      continue; // ignore unknown axes
+    }
+    if (axes[c]) continue; // duplicate
+    add(key, a, c, isComposite);
+  }
+  // An unknown axis in a vertical-like reference system is the z axis, unless there is one already.
+  for (const key of unnamed) {
+    if (axes.z) break;
+    const a = raw[key] as Json;
+    // Only a numeric axis can be a level (an `ensemble` member list under an IdentifierRS is not).
+    // Explicit `values` or a compact numeric `start`/`stop`/`num` axis; the latter stays unexpanded (size-checked later).
+    if (Array.isArray(a.values)) {
+      if (!a.values.length || !a.values.every((v: unknown) => typeof v === 'number')) continue;
+    } else if (!(typeof a.start === 'number' && typeof a.stop === 'number' && Number.isInteger(a.num) && a.num >= 1)) {
+      continue;
+    }
+    add(key, a, 'z', false);
   }
   return { axes, keyToCanon };
 }
@@ -488,7 +538,7 @@ export function parseCoverageJson(json: unknown, options: ParseOptions = {}): Co
   }
   const covs: Cov[] = coverages.map((cov) => {
     const domain = cov.domain as Json;
-    const { axes, keyToCanon } = readAxes(domain);
+    const { axes, keyToCanon } = readAxes(domain, root.referencing);
     const kind = kindOf(domainTypeOf(domain?.domainType) ?? domainTypeOf(cov.domainType) ?? domainTypeOf(root.domainType), axes);
     return { cov, kind, axes, keyToCanon };
   });
@@ -725,4 +775,22 @@ export function pointSeries(layer: DataLayer, index: number, param: string): { t
     const v = layer.values(param, ti)[index];
     return { time, value: v === undefined || Number.isNaN(v) ? null : v };
   });
+}
+
+/**
+ * The vertical (z) axis of the first coverage of a CoverageJSON response, as the server sent it: `values` as strings
+ * (so they can be sent back as `z=`) and the axis `name` (e.g. `pressure`). `null` when there is none. Cheap: it reads
+ * the domain only, never the ranges, and never throws.
+ */
+export function coverageLevels(json: unknown): { name: string; values: string[] } | null {
+  try {
+    const root = json as Json;
+    const cov: Json | undefined = root?.type === 'CoverageCollection' ? root.coverages?.[0] : root;
+    if (!cov?.domain) return null;
+    const z = readAxes(cov.domain as Json, root.referencing).axes.z;
+    if (!z || z.length === 0 || z.length > 10_000) return null;
+    return { name: z.key, values: z.values.map((v) => String(v)) };
+  } catch {
+    return null;
+  }
 }

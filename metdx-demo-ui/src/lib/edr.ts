@@ -186,7 +186,7 @@ export function buildEdrUrl(q: EdrQuery): string | null {
   const tail = (): string => {
     let s = '';
     if (params.length) s += `&parameter-name=${params.join(',')}`;
-    if (q.level && needsLevel(params)) s += `&z=${q.level}`;
+    if (q.level) s += `&z=${q.level}`;
     if (q.datetime) s += `&datetime=${q.datetime}`;
     return `${s}&f=json`;
   };
@@ -851,6 +851,60 @@ export function parseTemporal(data: unknown): TemporalExtent {
   const s = first[0];
   const e = first[1];
   return { start: typeof s === 'string' && s ? s : null, end: typeof e === 'string' && e ? e : null };
+}
+
+/** Vertical extent of a collection or instance: the offered levels, as the server writes them. */
+export interface VerticalExtent {
+  /** The listed levels (`extent.vertical.values`), in server order and notation; `[]` when only an interval is given. */
+  values: string[];
+  /** First `interval` pair, when numeric. */
+  interval: [number, number] | null;
+  /** Vertical reference system (`vrs`), e.g. a CRS URI or `Pressure`; `null` when not given. */
+  vrs: string | null;
+}
+
+/** Most levels a repeating-interval value (`R10/0/100`) is expanded to. */
+const MAX_VERTICAL_VALUES = 1000;
+
+/** `values` entries of `extent.vertical`: numbers/strings as given; `Rn/start/step` repeating intervals expanded. */
+function verticalValues(list: unknown[]): string[] {
+  const out: string[] = [];
+  for (const v of list) {
+    if (typeof v === 'number' && Number.isFinite(v)) out.push(String(v));
+    else if (typeof v === 'string' && v.trim()) {
+      const m = /^R(\d+)\/([^/]+)\/([^/]+)$/.exec(v.trim());
+      if (m) {
+        const n = Number(m[1]);
+        const start = Number(m[2]);
+        const step = Number(m[3]);
+        if (Number.isFinite(start) && Number.isFinite(step)) {
+          for (let i = 0; i < n && out.length < MAX_VERTICAL_VALUES; i++) out.push(String(Number((start + i * step).toPrecision(12))));
+        }
+      } else out.push(v.trim());
+    }
+    if (out.length >= MAX_VERTICAL_VALUES) break;
+  }
+  return out;
+}
+
+/**
+ * Vertical extent from `extent` / `extents` (collections and instances): `{interval: [[min, max]], values?, vrs?}`.
+ * `null` when there is no `vertical` member.
+ */
+export function parseVerticalExtent(data: unknown): VerticalExtent | null {
+  const d = (data ?? {}) as Json;
+  const ext = (d.extents ?? d.extent ?? {}) as Json;
+  const v = ext.vertical;
+  if (!v || typeof v !== 'object') return null;
+  const iv = Array.isArray(v.interval) && Array.isArray(v.interval[0]) ? v.interval[0] : [];
+  const lo = Number(iv[0]);
+  const hi = Number(iv[1]);
+  const interval: [number, number] | null = iv.length >= 2 && iv[0] != null && iv[1] != null && Number.isFinite(lo) && Number.isFinite(hi) ? [lo, hi] : null;
+  return {
+    values: Array.isArray(v.values) ? verticalValues(v.values) : [],
+    interval,
+    vrs: typeof v.vrs === 'string' && v.vrs ? v.vrs : null,
+  };
 }
 
 function unitOf(p: Json): string {
