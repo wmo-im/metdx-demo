@@ -54,6 +54,7 @@ import {
   describePoints,
   drawKindFor,
   geometryToPoints,
+  instanceToIso,
   instanceUrl,
   makeIso,
   instancesUrl,
@@ -464,13 +465,28 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
     hadInstance.current = true;
     let live = true;
     setDtHint('Loading forecast range...');
+    // No time range advertised (or no instance document): the instance id is the forecast run time, so
+    // default to it and the 24 h after it. Returns false when the id is not a datetime.
+    const applyRunTime = (data: unknown): boolean => {
+      const start = instanceToIso(effectiveInstance);
+      if (!start) return false;
+      const end = new Date(Date.parse(start) + 24 * 3600_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+      applyTemporal({ start, end }, 'Forecast run (no time range advertised)', data);
+      return true;
+    };
     fetchJson(instanceUrl(collectionUrl, effectiveInstance)).then(
       (data) => {
         if (!live) return;
         setInstanceVertical(parseVerticalExtent(data));
-        applyTemporal(parseTemporal(data), 'Valid range', data);
+        const t = parseTemporal(data);
+        // only when nothing is advertised: an open-ended interval (`[null, end]` / `[start, null]`) or `values` still win
+        if (!t.start && !t.end && !parseTemporalValues(data) && applyRunTime(data)) return;
+        applyTemporal(t, 'Valid range', data);
       },
-      (e) => live && setDtHint(`Could not load instance details: ${errorMessage(e)}`),
+      (e) => {
+        if (!live) return;
+        if (!applyRunTime(null)) setDtHint(`Could not load instance details: ${errorMessage(e)}`);
+      },
     );
     return () => {
       live = false;

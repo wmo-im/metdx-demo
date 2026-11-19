@@ -375,6 +375,39 @@ export function defaultDatetime(mode: EdrMode, temporal: TemporalExtent, start?:
   return { ...fields, endDate: e.date, endTime: e.time };
 }
 
+// `2026-11-18T12:00:00Z`, `2026-11-18T12:00Z`, `2026-11-18 12:00:00+00:00`, `2026-11-18T120000` (Met Office), `2026-11-18`
+const EXTENDED_INSTANCE = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2})(?::?(\d{2}))?(?::?(\d{2}))?(?:[.,]\d+)?)?\s*(Z|[+-]\d{2}(?::?\d{2})?)?$/i;
+// `20261118T1200`, `20261118T12`, `20261118T120000Z`, `2026111812`, `202611181200`, `20261118`
+const COMPACT_INSTANCE = /^(\d{4})(\d{2})(\d{2})(?:T?(\d{2})(?:(\d{2})(\d{2})?)?)?(Z)?$/i;
+
+/**
+ * An instance id read as a UTC instant (`YYYY-MM-DDTHH:MM:SSZ`): the Met Office `2026-11-18T120000`, ISO 8601
+ * (extended or compact, with or without seconds / `Z` / an offset), or a bare date. Times default to 00:00:00,
+ * an offset is applied. `null` when the id is not a datetime (e.g. `latest`, `run-7`).
+ */
+export function instanceToIso(id: string | null | undefined): string | null {
+  const s = (id ?? '').trim();
+  const m = s.match(EXTENDED_INSTANCE) ?? s.match(COMPACT_INSTANCE);
+  if (!m) return null;
+  const [y, mo, d, h = 0, mi = 0, sec = 0] = [1, 2, 3, 4, 5, 6].map((i) => (m[i] === undefined ? 0 : Number(m[i])));
+  const t = Date.UTC(y, mo - 1, d, h, mi, sec);
+  const check = new Date(t);
+  // reject out-of-range parts (month 13, 25:00, 31 Feb) instead of letting Date roll them over
+  if (check.getUTCFullYear() !== y || check.getUTCMonth() !== mo - 1 || check.getUTCDate() !== d) return null;
+  if (h > 23 || mi > 59 || sec > 59) return null;
+  const zone = m[7];
+  let offsetMs = 0;
+  if (zone && zone.toUpperCase() !== 'Z') {
+    const z = zone.match(/^([+-])(\d{2}):?(\d{2})?$/);
+    if (!z) return null;
+    const oh = Number(z[2]);
+    const om = Number(z[3] ?? 0);
+    if (oh > 23 || om > 59) return null;
+    offsetMs = (z[1] === '-' ? -1 : 1) * (oh * 60 + om) * 60_000;
+  }
+  return new Date(t - offsetMs).toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
 /* ------------------------------------------------ available times (temporal `values`) */
 
 /** Upper bound on the expanded instants (a `PT1S` series over years would freeze the tab). */

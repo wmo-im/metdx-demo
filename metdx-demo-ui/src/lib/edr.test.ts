@@ -30,6 +30,7 @@ import {
   drawKindFor,
   geometryToPoints,
   instanceUrl,
+  instanceToIso,
   instancesUrl,
   makeIso,
   needsLevel,
@@ -298,6 +299,42 @@ describe('datetime helpers', () => {
     }
     expect(defaultDatetime('area', { start: null, end: null })).toBeNull();
     expect(defaultDatetime('area', { start: null, end: null }, '2026-01-02T00:00:00Z')?.startDate).toBe('2026-01-02');
+  });
+  it('instanceToIso reads the instance-id formats as UTC instants', () => {
+    const want = '2026-11-18T12:00:00Z';
+    for (const id of [
+      '2026-11-18T120000', // Met Office
+      '2026-11-18T12:00:00Z', // fixtures (operational-data, stepped-data)
+      '2026-11-18T12:00Z',
+      '2026-11-18T12:00:00',
+      '2026-11-18T12:00:00.000Z',
+      '2026-11-18 12:00:00+00:00',
+      '2026-11-18T13:00:00+01:00',
+      '2026-11-18T07:00:00-05:00',
+      '2026-11-18t12:00:00z',
+      '20261118T1200',
+      '20261118T12',
+      '20261118T120000Z',
+      '2026111812',
+      '202611181200',
+      ' 2026-11-18T120000 ',
+    ]) {
+      expect(instanceToIso(id), id).toBe(want);
+    }
+    expect(instanceToIso('2026-10-19T00:00:00Z')).toBe('2026-10-19T00:00:00Z'); // test/fixtures/instances/*.json
+    expect(instanceToIso('20261118')).toBe('2026-11-18T00:00:00Z');
+    expect(instanceToIso('2026-11-18')).toBe('2026-11-18T00:00:00Z');
+    expect(instanceToIso('2026-11-18T12:34:56Z')).toBe('2026-11-18T12:34:56Z');
+    expect(instanceToIso('2026-12-31T23:30:00-01:00')).toBe('2027-01-01T00:30:00Z'); // the offset rolls the date over
+    expect(instanceToIso('2024-02-29T00:00:00Z')).toBe('2024-02-29T00:00:00Z');
+  });
+  it('instanceToIso is null for ids that are not a datetime', () => {
+    for (const id of ['', '   ', 'latest', '10u', 'run-7', '12345', '2026-13-01', '2026-02-30', '2026-11-18T25:00:00Z', '2026-11-18T12:60Z',
+      '2026-11-18T12:00:00+25:00', '20261318', '2026-11-18T12:00:00Zjunk', '2026-11-18/2026-11-19', '1234567890123456']) {
+      expect(instanceToIso(id), id).toBeNull();
+    }
+    expect(instanceToIso(null)).toBeNull();
+    expect(instanceToIso(undefined)).toBeNull();
   });
   it('parseCollection hides `instances` from the unknown query types', () => {
     const c = parseCollection({ data_queries: { position: {}, instances: {}, items: {}, locations: {} } });
