@@ -2,6 +2,7 @@
 
 ## Contents
 
+- [Introduction](#introduction)
 - [Step 1: Find the dataset](#step-1-find-the-dataset)
 - [Step 2: The data is a pile of GRIB files](#step-2-the-data-is-a-pile-of-grib-files)
 - [Step 3: Which file do I actually need?](#step-3-which-file-do-i-actually-need)
@@ -12,6 +13,13 @@
 - [Step 8: For the rest of us, a Web API](#step-8-for-the-rest-of-us-a-web-api)
 - [And Beyond: integration with AI agents](#and-beyond-integration-with-ai-agents)
   
+## Introduction  
+
+- We've prepared a demonstration to help illustrate how these "least disruptive" approaches - Web services and ARCO data - build on top of WIS2
+- In the interests of time, we'll move through the demo quite quickly
+- There's more to see at the WIS2 booth just outside - more examples, and more time to talk through how these demos work
+- Please do stop by and talk to \[Jeremy, Tom, Secretariat colleagues\]
+
 ## Step 1: Find the dataset  
 ![slide-1-step-1.png](images/slide-1-step-1.png)  
 1. Setup:   
@@ -304,8 +312,6 @@ chunk      init_time       lead_h  url                                          
        - Next, the notebook calculates the sun position, clear-sky sunlight amounts, accumulations over time, solar panel outputs, daily totals. 
        - The notebook finishes by estimating how much power a battery would charge, recommends when to run heavy appliances, and generates some charts.
 
-==TODO Adam will send more notebooks==  
-  
 ![ecmwf-virtual-cube-architecture.png](images/47B626F6-A626-4526-9F6C-D6880BBB956C.png)  
 ![ecmwf-virtual-cube-architecture-workflow.png](images/C9876A37-EAFA-45A1-B155-77E19C365C2D.png)  
   
@@ -318,7 +324,7 @@ chunk      init_time       lead_h  url                                          
 5. The `collection` resource is JSON metadata. Click on the "OGC EDR" (`collection`) link to load it (target: https://polytope-edr.lumi.apps.dte.destination-earth.eu/collections/operational-data?f=json). It's a standard-compliant JSON document meant for machines not humans. It contains all the metadata needed for the Web UI to build a meaningful query interface for a user - everything is driven by the metadata. As an example, search in the JSON for `data_queries` - this shows the query types that the EDR end-point supports.
 6. A short explainer for the data pipeline - from source to OGC API endpoint
 
-   **==TODO==** _Stack-diagram for the Polytope EDR pipeline (IFS → … → OGC API – EDR): ask ECMWF (@awarde96) for a description like the Canadian VOF one._
+   ![ECMWF Polytope EDR pipeline: from the Fields DataBase to OGC API – EDR](images/ecmwf-polytope-edr-pipeline.png)
 
 7. **EDR:** open the EDR query builder:
    - You'll see the available parameters - let's pick `2t` (2m temperature)
@@ -328,14 +334,14 @@ chunk      init_time       lead_h  url                                          
    - The Web UI builds the EDR query and displays it at the bottom of the page 
    - Click "Open in browser" (↗) to open the query URL in a new tab - it's more JSON (CoverageJSON), again, designed for machines not humans
    - Back in the Web UI click "Fetch" to illustrate how machines can make data interpretable to humans - the Web UI zooms in on the point and displays a time-series chart in the left-hand panel; if you move the time-slider, the dot on the map changes colour according to the temperature scale.
-9. Now - let's do an area query:
-   - To reduce the amount of data we're asking for, narrow the "Datetime" window to 12 hours
+9. Now - let's do an area query - select "AREA" query type:
    - Zoom out to the European area
-   - Select query type "AREA", then "RECTANGLE", then "Draw area" - draw the bounding box on the map _(don't select too large an area - this test service is limited in the amount of data it will return in a single query)_
+   - Select "RECTANGLE", then "Draw area" - draw the bounding box on the map _(don't select too large an area - this test service is limited in the amount of data it will return in a single query)_
+   - In the "Datetime" section, select "RANGE" - we want data for several steps
+   - To reduce the amount of data we're asking for, narrow the "Datetime" window to 6 hours
    - Again, you see the EDR query URL that's been built
    - Click "Fetch" _(this can take a while depending on the time duration and bounding box size)_ - the Web UI zooms into the requested area and plots the data on the map ("CONTOURS" or "POINTS" for different plotting styles)
-   - **==TODO==** _check if there is a time-slide widget when multiple timesteps of data are retrieved (doesn't seem so yet)_
-   - _(you can draw an area with a polygon if you select "POLYGON" in the Web UI)_
+   - Use the time-slider to step through the hourly data steps
 10. **Maps:** _(time allowing)_ open the Maps view: a rendered forecast map, no data handling at all.
 11. Now head back to the main catalogue search page and select the "Canadian weather forecast \[experimental\]" dataset
     - A short explainer for the data pipeline:
@@ -350,10 +356,10 @@ chunk      init_time       lead_h  url                                          
     - Click "Draw position", then add a point on the map (e.g., Toronto), select "AirTemp (Air Temperature) \[celsius\]" from the parameter list, and click "Fetch" _(we leave the "Datetime" selector with default values to select the complete time-range)_
     - The Web UI zooms in on the selected point and shows the time-series chart in the left-hand panel _(use the time-slider to see the dot on the map change colour)_
 14. What about a larger dataset? Head back to the catalogue search page and select the "ERA5 hourly reanalysis on single levels, served from cloud-optimised Zarr" dataset: a global dataset with data from 1940 to the present (about a week behind real time)
-    - _Behind this: ERA5 is stored as analysis-ready, cloud-optimised (ARCO) Zarr, organised for fast reads, so a decade at a single point comes back in seconds._
+    - _Behind this: ERA5 is stored as analysis-ready, cloud-optimised (ARCO) Zarr, in two copies: one chunked for time series at a point, one for whole maps. A position query reads the time-series copy, so a decade at a single point comes back in seconds._
     - A short explainer for the data pipeline:
 
-    **==TODO==** _Stack-diagram for the ERA5 pipeline (ERA5 → ARCO Zarr → Polytope EDR on DestinE → CoverageJSON): ask ECMWF (@awarde96) for a description like the Canadian VOF one. Probably one request covering both this and the point 6 diagram._
+    ![ERA5 ARCO pipeline: from the Copernicus archive to OGC API – EDR](images/era5-arco-edr-pipeline.png)
 
 15. **EDR:**
     - Open the EDR query builder. This time the query types are "POSITION", "AREA" and "CUBE": this endpoint's `data_queries` offers three of the six you saw for the ECMWF forecast. Same UI, different metadata.
@@ -361,8 +367,22 @@ chunk      init_time       lead_h  url                                          
     - Select a "Parameter" - e.g., "t2m (2 metre temperature) \[K\]"
     - Select 10 years of data in the "Datetime" panel - e.g., 2016-01-01 00:00 to 2025-12-31 23:59
     - Click "Fetch". Ten years of hourly data (about 87,600 values) comes back in around ten seconds, and you can see the annual temperature cycle
-16. **==TODO==** _Add sections for other datasets, e.g., "Met Office Global Model forecast via OGC EDR (ICE demo, Met Office Labs)" << ==this service is currently timing out==_
-17. Using Web APIs isn't just a future thing - in Europe, [EUMETNET](https://www.eumetnet.eu) has built on the foundations of WIS2 with [MeteoGate](https://meteogate.eu) to provide federated access to Web services from its Members.
+16. Head back to the catalogue search page and select the "Met Office Global Deterministic" dataset: the Met Office's global 10 km forecast, four runs a day
+    - _Behind this: the Met Office publishes CF-netCDF files to Amazon S3 (the AWS open data registry). They stay there: an Icechunk manifest records where each chunk sits inside each file, so the EDR server reads only the byte ranges a query needs._
+    - A short explainer for the data pipeline:
+
+    ![Met Office Global Deterministic pipeline: from CF-netCDF on Amazon S3 to OGC API – EDR](images/metoffice-global-edr-pipeline.png)
+
+17. **EDR:**
+    - Zoom into the British Isles
+    - Open the EDR query builder: the query types are "POSITION", "AREA", "RADIUS" and "CUBE" (plus `instances`, its model runs). Again, that's this endpoint's `data_queries` metadata.
+    - Select "AREA", click "Draw area", then draw a small box on the map - e.g., over southern England _(keep it small: every grid point in the box comes back)_
+    - Select "air_temperature (Air temperature at pressure level) \[K\]" from the parameter list
+    - **==TODO==** _select a pressure level, e.g., 850 hPa (this endpoint gives pressure in Pa, so `z=85000`): check how the Web UI offers the vertical levels_
+    - In the "Datetime" section, select a single time - e.g., **==TODO==** _a time in the newest model run (on 2026-11-12 the newest instance was 2026-10-29T00Z, covering 2026-10-29 to 2026-11-05)_
+    - Click "Fetch": the Web UI shows the temperature field over the box
+    - **==TODO==** _check the response time in the Web UI: on 2026-11-12 an area query over England and Wales took 30 s and returned 6.8 MB, and later queries timed out_
+18. Using Web APIs isn't just a future thing - in Europe, [EUMETNET](https://www.eumetnet.eu) has built on the foundations of WIS2 with [MeteoGate](https://meteogate.eu) to provide federated access to Web services from its Members.
     - MeteoGate includes a Web application called [Data Explorer](https://explorer.meteogate.eu/workspace/defaultDataExplorerWorkspacePreset) _(based on [GeoWeb](https://opengeoweb.gitlab.io) - developed by KNMI, MetNo, and FMI)_ - open [Data Explorer](https://explorer.meteogate.eu/workspace/defaultDataExplorerWorkspacePreset) in a browser
     - Data Explorer loads presets for common tooling - starting with a widget to search the WIS2 Catalogue
     - Unselect the "MeteoGate only" button to see all the WIS2 catalogue records
@@ -371,7 +391,7 @@ chunk      init_time       lead_h  url                                          
     - Behind the scenes Data Explorer is talking to an OGC API EDR endpoint for the E-SOH system (EUMETNET Supplementary Observations Datahub, see documentation [here](https://github.com/EUMETNET/e-soh-documentation/wiki/1.-Get-started)) that publishes a rolling 24-hour cache of observations for observing stations operated by EUMETNET Members
     - The map panel is showing "frog-spawn": one dot for each observing station from which data is available
     - On the map, pick a station (e.g., Helsinki Kumpula) and the data panel loads the last 24 hours of data for each parameter the station reports
-18. The point: the UI knows nothing about ECMWF or ECCC. Everything it does comes from each record's links and the collection metadata behind them (**metadata-driven**). That's why the same UI offered six query types for the ECMWF forecast, three for ERA5 and only `position` for Canada. And MeteoGate's Data Explorer shows the same pattern at European scale: catalogue first, then standard APIs.
+19. The point: the UI knows nothing about ECMWF or ECCC. Everything it does comes from each record's links and the collection metadata behind them (**metadata-driven**). That's why the same UI offered six query types for the ECMWF forecast, three for ERA5 and only `position` for Canada. And MeteoGate's Data Explorer shows the same pattern at European scale: catalogue first, then standard APIs.
 
 The UI is a static web page (GitHub Pages): the browser calls the catalogue and the APIs directly. Direct links for the ECMWF 0.1° record:
 - [this record in the UI](https://wmo-im.github.io/metdx-demo/metdx-demo-ui/#/record/urn%3Awmo%3Amd%3Aint-ecmwf%3Aecmwf-opendata-ifs-0p1-oper)
