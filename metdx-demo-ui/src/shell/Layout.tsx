@@ -47,10 +47,18 @@ export function Layout() {
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default' }}>
       <AppBar position="static" elevation={1}>
         <Toolbar variant="dense" sx={{ gap: 1 }}>
-          <PublicIcon />
-          <Typography variant="h6" component="h1" sx={{ flexGrow: 1, fontSize: 18 }}>
-            MetDX Demo
-          </Typography>
+          <Box
+            component={RouterLink}
+            to={paths.catalogue()}
+            aria-label="MetDX Demo home"
+            sx={{ display: 'flex', alignItems: 'center', gap: 1, color: 'inherit', textDecoration: 'none' }}
+          >
+            <PublicIcon />
+            <Typography variant="h6" component="h1" sx={{ fontSize: 18 }}>
+              MetDX Demo
+            </Typography>
+          </Box>
+          <Box sx={{ flexGrow: 1 }} />
           <EngineToggle />
           {isMockMode() && <Chip size="small" color="secondary" label="mock data" />}
           <Tooltip title="Code on GitHub">
