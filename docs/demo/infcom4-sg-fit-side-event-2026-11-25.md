@@ -342,9 +342,9 @@ chunk      init_time       lead_h  url                                          
    - Again, you see the EDR query URL that's been built
    - Click "Fetch" _(this can take a while depending on the time duration and bounding box size)_ - the Web UI zooms into the requested area and plots the data on the map ("CONTOURS" or "POINTS" for different plotting styles)
    - Use the time-slider to step through the hourly data steps
-10. **Maps:** _(time allowing)_ Return back to the Record and click "OGC Maps"  open the Maps view: a rendered forecast map, no data handling at all.
+10. **Maps:** _(time allowing)_ return to the record and click "OGC Maps" to open the Maps view: a rendered forecast map, no data handling at all.
     - A Map service returns images - there's no data for the client to handle
-    - Keep the default "Instance", "Date", "Time, and "Parameter" ("2t", 2-m temperature); click "Draw BBOX" to select an area on the map, then press "Fetch"
+    - Keep the default "Instance", "Date", "Time" and "Parameter" ("2t", 2-m temperature); click "Draw BBOX" to select an area on the map, then press "Fetch"
     - The Map service renders the forecast map and returns it; the client application displays the image
 11. Now head back to the main catalogue search page and select the "Canadian weather forecast \[experimental\]" dataset
     - A short explainer for the data pipeline:
@@ -353,17 +353,17 @@ chunk      init_time       lead_h  url                                          
 
 12. **Maps:**
     - Zoom in on Canada
-    - The Map service returns an image rendered from the data from a specific model run (or “instance”) on the server - we’ll leave the “instance” at the default (latest) run
+    - The Map service returns an image rendered from the data from a specific model run (or "instance") on the server - we'll leave the "instance" at the default (latest) run
     - Select the "Date" and "Time" that you want the image for - these values are provided as options in the UI, driven by the metadata in the collection document
     - Select "Parameter" (e.g., AirTemp)
-    - Click “Draw BBOX” and then draw the area on the map, and click “FETCH”
+    - Click "Draw BBOX" and then draw the area on the map, and click "Fetch"
     - The server builds the image and sends it to the client for display
     - You can see the URL used for the Maps request at the bottom of the page
 13. **EDR:**
     - Zoom into the Great Lakes area
     - In the query builder only "POSITION" is available: this EDR endpoint supports only position queries (plus `instances`, its model runs). It's the same `data_queries` metadata you saw for ECMWF in point 5; open the "OGC EDR" `collection` link to compare.
     - Click "Draw position", then add a point on the map (e.g., Toronto), select "AirTemp (Air Temperature) \[celsius\]" from the parameter list
-    - In "Datetime" set "Start date" to today, and "End date" for 5-days later, then click "Fetch"
+    - In "Datetime" set "Start date" to today, and "End date" to five days later, then click "Fetch"
     - The Web UI zooms in on the selected point and shows the time-series chart in the left-hand panel _(use the time-slider to see the dot on the map change colour)_
 14. What about a larger dataset? Head back to the catalogue search page and select the "ERA5 hourly reanalysis on single levels, served from cloud-optimised Zarr" dataset: a global dataset with data from 1940 to the present (about a week behind real time)
     - _Behind this: ERA5 is stored as analysis-ready, cloud-optimised (ARCO) Zarr, in two copies: one chunked for time series at a point, one for whole maps. A position query reads the time-series copy, so a decade at a single point comes back in seconds._
@@ -383,13 +383,13 @@ chunk      init_time       lead_h  url                                          
 
     ![Met Office Global Deterministic pipeline: from CF-netCDF on Amazon S3 to OGC API – EDR](images/metoffice-global-edr-pipeline.png)
 
-17. **EDR:** Select the “EDR” viewer; this open the query interface for the Met Office Global Deterministic data that is on standard levels _(pressure levels is another collection, not shown in the demo)_
+17. **EDR:** Select the "EDR" viewer; this opens the query interface for the Met Office Global Deterministic data that is on standard levels _(pressure levels are in another collection, not shown in the demo)_
     - This EDR service supports query types "POSITION", "AREA", "RADIUS" and "CUBE" (plus `instances`, its model runs); again, that's this endpoint's `data_queries` metadata
     - Zoom into the European area
-    - Select “AREA”, “RECTANGLE”, then “Draw area” and draw a bounding box on the map for your selected area
-    - Choose “temperature_at_screen_level (1.5m (screen level) temperature) \[K\]” from “Parameters” 
-    - In “Datetime” choose “RANGE”; the default selects a 6-hour period
-    - Click “Fetch” to retrieve the data; use the time-slider to animate through the 7 time-steps returned
+    - Select "AREA", "RECTANGLE", then "Draw area" and draw a bounding box on the map for your selected area
+    - Choose "temperature_at_screen_level (1.5m (screen level) temperature) \[K\]" from "Parameters"
+    - In "Datetime" choose "RANGE"; the default selects a 6-hour period
+    - Click "Fetch" to retrieve the data; use the time-slider to animate through the 7 time-steps returned
 18. Using Web APIs isn't just a future thing - in Europe, [EUMETNET](https://www.eumetnet.eu) has built on the foundations of WIS2 with [MeteoGate](https://meteogate.eu) to provide federated access to Web services from its Members.
     - MeteoGate includes a Web application called [Data Explorer](https://explorer.meteogate.eu/workspace/defaultDataExplorerWorkspacePreset) _(based on [GeoWeb](https://opengeoweb.gitlab.io) - developed by KNMI, MetNo, and FMI)_ - open [Data Explorer](https://explorer.meteogate.eu/workspace/defaultDataExplorerWorkspacePreset) in a browser
     - Data Explorer loads presets for common tooling - starting with a widget to search the WIS2 Catalogue
