@@ -157,6 +157,9 @@ describe('collection + schema', () => {
   it('reads the extent', () => {
     expect(collectionExtent(collection)).toEqual([-180, -90, 180, 90]);
     expect(collectionExtent({})).toBeNull();
+    expect(collectionExtent({ bbox: [-180, -90, 180, 90] })).toEqual([-180, -90, 180, 90]); // flat, as the Met Office sends it
+    expect(collectionExtent({ bbox: [-180, -90, 0, 180, 90, 10] })).toEqual([-180, -90, 180, 90]);
+    expect(collectionExtent({ bbox: [-180, -90, 180, NaN] })).toBeNull();
   });
 
   it('parses instances, datetimes and parameters from the schema', () => {

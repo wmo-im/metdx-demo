@@ -49,14 +49,20 @@ const CONTOUR_MODES = ['area', 'radius', 'cube'];
 
 type Parsed = { layer: CovJsonLayer; error?: undefined } | { layer?: undefined; error: string };
 
-function parse(data: unknown, levelIndex: number): Parsed {
+function parse(data: unknown, levelIndex: number, runIndex: number | undefined): Parsed {
   try {
-    return { layer: parseCoverageJson(data, { levelIndex }) };
+    return { layer: parseCoverageJson(data, { levelIndex, runIndex }) };
   } catch (e) {
     if (e instanceof TooLargeToDraw) return { error: `${e.message}. Narrow the area, the datetime range or the parameters to draw it on the map.` };
     if (e instanceof CovJsonError) return { error: `Cannot draw this response on the map: ${e.message}` };
     return { error: `Cannot draw this response on the map: ${e instanceof Error ? e.message : String(e)}` };
   }
+}
+
+/** A forecast run as `YYYY-MM-DD HH:MMZ` (an ISO instant; anything else as sent). */
+function fmtRun(t: string): string {
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::\d{2}(?:\.\d+)?)?Z$/.exec(t);
+  return m ? `${m[1]} ${m[2]}Z` : t;
 }
 
 const fmtValue = (v: number) => (Number.isNaN(v) ? 'no data' : String(Number(v.toPrecision(6))));
@@ -89,7 +95,8 @@ export function ResultPanel({ result, mode, onViewJson }: Props) {
   const [coverageError, setCoverageError] = useState<string | null>(null);
   const useCoverage = canCoverage && renderer === 'coverage';
   const [levelIndex, setLevelIndex] = useState(() => initialLevelIndex(result));
-  const parsed = useMemo(() => parse(result.data, levelIndex), [result.data, levelIndex]);
+  const [runIndex, setRunIndex] = useState<number | undefined>(undefined); // undefined = the latest run
+  const parsed = useMemo(() => parse(result.data, levelIndex, runIndex), [result.data, levelIndex, runIndex]);
   const layer = parsed.layer;
 
   const [paramKey, setParamKey] = useState('');
@@ -260,6 +267,15 @@ export function ResultPanel({ result, mode, onViewJson }: Props) {
                 {layer.levels.map((l, i) => (
                   <MenuItem key={i} value={i}>
                     {l}
+                  </MenuItem>
+                ))}
+              </TextField>
+            )}
+            {layer.runs.length > 1 && (
+              <TextField select size="small" label="Forecast run" value={layer.runIndex} onChange={(e) => setRunIndex(Number(e.target.value))}>
+                {layer.runs.map((r, i) => (
+                  <MenuItem key={i} value={i}>
+                    {fmtRun(r)}
                   </MenuItem>
                 ))}
               </TextField>

@@ -10,6 +10,7 @@ import { createMockFetch } from '../../lib/mockFetch';
 import type { Geometry } from '../../lib/types';
 import type { DataLayer, DataSelectHandler, ShowDataOptions } from '../../lib/covjsonTypes';
 import type { CovJsonLayer } from '../../lib/covjson';
+import stnlvl from '../../../test/fixtures/edr/metoffice-stnlvl-noinstance.json';
 import liveAreaSteps from '../../../test/fixtures/edr/live-area-steps.json';
 
 const COL = 'https://polytope-edr.lumi.apps.dte.destination-earth.eu/collections/operational-data';
@@ -322,6 +323,33 @@ describe('EDR result on the map', () => {
     expect(map.last.layer).not.toBe(first);
     expect(map.last.opts).toMatchObject({ param: 'b', timeIndex: 1 });
     expect(within(panel).getByTestId('edr-selected')).toHaveTextContent('= 2112 m');
+  });
+
+  it('a forecast reference time axis is a "Forecast run" choice (latest first), never a "Level"', async () => {
+    renderPage(() => stnlvl);
+    const user = await query('position');
+    const panel = await screen.findByTestId('edr-result');
+    const key = 'air_pressure_at_sea_level';
+    const first = map.last.layer as CovJsonLayer;
+    expect(first.levels).toEqual([]);
+    expect(first.runIndex).toBe(1);
+    expect(within(panel).queryByLabelText('Level')).toBeNull();
+    const select = within(panel).getByLabelText('Forecast run');
+    expect(select).toHaveTextContent('2026-11-19 12:00Z');
+    const chartBefore = within(panel).getByTestId(`chart-${key}`).innerHTML;
+    const series = (l: DataLayer) => Array.from(l.values(key, 0)).slice(0, 1);
+    expect(series(first)).toEqual([98728]);
+
+    await user.click(select);
+    const options = await screen.findAllByRole('option');
+    expect(options.map((o) => o.textContent)).toEqual(['2026-11-18 12:00Z', '2026-11-19 12:00Z']);
+    await user.click(options[0]);
+    const other = map.last.layer as CovJsonLayer;
+    expect(other).not.toBe(first);
+    expect(other.runIndex).toBe(0);
+    expect(series(other)).toEqual([98606]);
+    expect(within(panel).getByLabelText('Forecast run')).toHaveTextContent('2026-11-18 12:00Z');
+    expect(within(panel).getByTestId(`chart-${key}`).innerHTML).not.toBe(chartBefore);
   });
 
   describe('time slider on a multi-step area result', () => {

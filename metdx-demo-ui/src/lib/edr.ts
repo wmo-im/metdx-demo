@@ -976,9 +976,28 @@ export function parseCollection(data: unknown): EdrCollectionInfo {
       name: p?.observedProperty?.label?.en ?? id,
       unit: unitOf(p ?? {}),
     }));
-  const bb = d.extent?.spatial?.bbox?.[0];
-  const bbox: BBox | null = Array.isArray(bb) && bb.length >= 4 ? [bb[0], bb[1], bb[2], bb[3]] : null;
+  const bbox = collectionBBox(d);
   return { title: typeof d.title === 'string' ? d.title : undefined, modes, unknownQueries, params, bbox, temporal: parseTemporal(d) };
+}
+
+/**
+ * A valid bbox (4 numbers `[w, s, e, n]`, or 6 `[w, s, minZ, e, n, maxZ]`, all finite) as `[w, s, e, n]`, else `null`.
+ */
+export function bboxOfNumbers(bb: unknown): BBox | null {
+  if (!Array.isArray(bb) || (bb.length !== 4 && bb.length !== 6)) return null;
+  if (!bb.every((n) => typeof n === 'number' && Number.isFinite(n))) return null;
+  return bb.length === 4 ? [bb[0], bb[1], bb[2], bb[3]] : [bb[0], bb[1], bb[3], bb[4]];
+}
+
+/**
+ * The spatial bbox of a collection: the nested `extent.spatial.bbox[0]` (EDR / OGC API) or a flat bbox
+ * (`extent.spatial.bbox` or `bbox` holding the numbers themselves, as the Met Office sends it).
+ */
+export function collectionBBox(collection: unknown): BBox | null {
+  const d = (collection ?? {}) as Json;
+  const sp = d.extent?.spatial?.bbox;
+  const nested = Array.isArray(sp) ? sp[0] : undefined;
+  return bboxOfNumbers(nested) ?? bboxOfNumbers(sp) ?? bboxOfNumbers(d.bbox);
 }
 
 /** Instance ids from a `/instances` response. */

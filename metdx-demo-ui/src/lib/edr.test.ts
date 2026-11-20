@@ -430,6 +430,19 @@ describe('metadata parsing (fixtures)', () => {
     expect(c.bbox).toEqual([-180, -90, 180, 90]);
     expect(c.temporal).toEqual({ start: '2026-10-19T00:00:00Z', end: '2026-10-29T00:00:00Z' });
   });
+  it('parseCollection reads the nested or the flat bbox', () => {
+    expect(parseCollection({ extent: { spatial: { bbox: [[-10, 40, 20, 60]] } } }).bbox).toEqual([-10, 40, 20, 60]);
+    expect(parseCollection({ bbox: [-180, -90, 180, 90] }).bbox).toEqual([-180, -90, 180, 90]);
+    expect(parseCollection({ extent: { spatial: { bbox: [-180, -90, 180, 90] } } }).bbox).toEqual([-180, -90, 180, 90]);
+    // 6 numbers: west, south, min z, east, north, max z
+    expect(parseCollection({ bbox: [-10, 40, 0, 20, 60, 1000] }).bbox).toEqual([-10, 40, 20, 60]);
+    expect(parseCollection({ extent: { spatial: { bbox: [[-10, 40, 0, 20, 60, 1000]] } } }).bbox).toEqual([-10, 40, 20, 60]);
+    // invalid: wrong length, not finite, not numbers
+    expect(parseCollection({ bbox: [1, 2, 3] }).bbox).toBeNull();
+    expect(parseCollection({ bbox: [1, 2, 3, NaN] }).bbox).toBeNull();
+    expect(parseCollection({ bbox: [1, 2, 3, '4'] }).bbox).toBeNull();
+    expect(parseCollection({}).bbox).toBeNull();
+  });
   it('splits advertised query types into known and unknown', () => {
     const c = parseCollection({ data_queries: { items: {}, area: {}, position: {} } });
     expect(c.modes).toEqual(['position', 'area']);

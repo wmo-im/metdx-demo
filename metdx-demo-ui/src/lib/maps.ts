@@ -4,7 +4,7 @@
  * `build_url`): `{map}?f=png&bbox=..&width=..&height=..&datetime=..&parameter-name=..&subset=z(..)`.
  * Values are emitted verbatim (not percent-encoded), exactly like Flet.
  */
-import { instanceToIso, needsLevel, splitIso, type VerticalExtent } from './edr';
+import { collectionBBox, instanceToIso, needsLevel, splitIso, type VerticalExtent } from './edr';
 import type { BBox, Geometry } from './types';
 
 export const OGC_MAP_REL = 'http://www.opengis.net/def/rel/ogc/1.0/map';
@@ -163,13 +163,9 @@ export function resolveMapUrl(collection: unknown, col: string): string {
   }
 }
 
-/** First spatial bbox of a collection's extent, if valid. */
+/** Spatial bbox of a collection (nested `extent.spatial.bbox[0]` or flat `bbox`), if valid. */
 export function collectionExtent(collection: unknown): BBox | null {
-  const bb = (collection as { extent?: { spatial?: { bbox?: unknown[] } } } | null)?.extent?.spatial?.bbox?.[0];
-  if (Array.isArray(bb) && bb.length >= 4 && bb.slice(0, 4).every((n) => typeof n === 'number' && Number.isFinite(n))) {
-    return [bb[0], bb[1], bb[2], bb[3]] as BBox;
-  }
-  return null;
+  return collectionBBox(collection);
 }
 
 /* ------------------------------------------------------------------- schema */

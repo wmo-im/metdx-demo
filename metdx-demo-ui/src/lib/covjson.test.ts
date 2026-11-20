@@ -3,6 +3,7 @@ import { CovJsonError, coverageLevels, normaliseTime, parseCoverageJson, pointSe
 import { MAX_GRID_CELLS, MAX_POINTS, TooLargeToDraw, isGridSpec, type GridSpec } from './covjsonTypes';
 import metOfficePressure from '../../test/fixtures/edr/metoffice-pressure-position.json';
 import mscPosition from '../../test/fixtures/edr/msc-position.json';
+import stnlvl from '../../test/fixtures/edr/metoffice-stnlvl-noinstance.json';
 import livePosition from '../../test/fixtures/edr/live-position.json';
 import liveArea from '../../test/fixtures/edr/live-area.json';
 import liveAreaFrance from '../../test/fixtures/edr/live-area-france.json';
@@ -707,5 +708,106 @@ describe('vertical axis detection', () => {
     (both.domain.axes as Record<string, unknown>).mylevel = { values: [1, 2, 3] };
     (both.domain.referencing as unknown[]).push({ coordinates: ['mylevel'], system: { type: 'IdentifierRS' } });
     expect(parseCoverageJson(both).levels).toEqual([850, 500]);
+  });
+
+  describe('forecast reference time axis (Met Office position without an instance)', () => {
+    const raw = (stnlvl as { ranges: { air_pressure_at_sea_level: { values: number[] } } }).ranges.air_pressure_at_sea_level.values;
+    // 1795003200e9 / 1795089600e9 ns since the epoch
+    const RUNS = ['2026-11-18T12:00:00Z', '2026-11-19T12:00:00Z'];
+
+    it('is a run choice, not a level; the latest run is the default', () => {
+      const l = parseCoverageJson(stnlvl);
+      expect(l.levels).toEqual([]);
+      expect(l.runs).toEqual(RUNS);
+      expect(l.runIndex).toBe(1);
+      expect(l.times).toHaveLength(25);
+      expect(raw.slice(0, 3)).toEqual([98606, 98728, 98608]);
+    });
+
+    it('reads the series of the selected run (t is the outer, run the next dimension)', () => {
+      const key = 'air_pressure_at_sea_level';
+      const at = (runIndex: number) => pointSeries(parseCoverageJson(stnlvl, { runIndex }), 0, key).map((p) => p.value);
+      expect(at(0)).toEqual(Array.from({ length: 25 }, (_, t) => raw[t * 2]));
+      expect(at(1)).toEqual(Array.from({ length: 25 }, (_, t) => raw[t * 2 + 1]));
+      expect(at(0).slice(0, 3)).toEqual([98606, 98608, 98644]);
+      expect(at(1).slice(0, 3)).toEqual([98728, 98762, 98818]);
+      // default = latest = run 1; out-of-range indices are clamped
+      expect(pointSeries(parseCoverageJson(stnlvl), 0, key).map((p) => p.value)).toEqual(at(1));
+      expect(pointSeries(parseCoverageJson(stnlvl, { runIndex: 9 }), 0, key).map((p) => p.value)).toEqual(at(1));
+      expect(pointSeries(parseCoverageJson(stnlvl, { runIndex: -3 }), 0, key).map((p) => p.value)).toEqual(at(0));
+    });
+
+    it('the parameter range covers the selected run only', () => {
+      const p0 = parseCoverageJson(stnlvl, { runIndex: 0 }).parameters[0];
+      const own = raw.filter((_, i) => i % 2 === 0);
+      expect([p0.min, p0.max]).toEqual([Math.min(...own), Math.max(...own)]);
+    });
+
+    it('coverageLevels does not report it; the pressure fixture still has 37 levels', () => {
+      expect(coverageLevels(stnlvl)).toBeNull();
+      expect(coverageLevels(metOfficePressure)?.values).toHaveLength(37);
+    });
+
+    /** A grid-less point series with a run axis of the given values and, optionally, a real z axis too. */
+    const withRun = (runs: unknown[], z?: number[]) => ({
+      type: 'Coverage',
+      domain: {
+        type: 'Domain',
+        domainType: 'PointSeries',
+        axes: {
+          x: { values: [10] },
+          y: { values: [50] },
+          t: { values: ['2026-01-01T00:00:00Z', '2026-01-01T01:00:00Z'] },
+          reftime: { values: runs },
+          ...(z ? { pressure: { values: z } } : {}),
+        },
+        referencing: [{ coordinates: ['reftime'], system: { type: 'IdentifierRS', id: 'forecast_reference_time' } }],
+      },
+      ranges: {
+        v: {
+          type: 'NdArray',
+          dataType: 'float',
+          axisNames: z ? ['t', 'reftime', 'pressure', 'y', 'x'] : ['t', 'reftime', 'y', 'x'],
+          shape: z ? [2, runs.length, z.length, 1, 1] : [2, runs.length, 1, 1],
+          values: Array.from({ length: 2 * runs.length * (z?.length ?? 1) }, (_, i) => i),
+        },
+      },
+    });
+
+    it('converts ns / µs / ms / s numbers and strings to ISO times', () => {
+      const iso = '2026-11-19T12:00:00Z';
+      const s = Date.parse(iso) / 1000;
+      for (const v of [s * 1e9, s * 1e6, s * 1e3, s]) {
+        expect(parseCoverageJson(withRun([v, v + (v >= 1e17 ? 3.6e12 : v >= 1e14 ? 3.6e9 : v >= 1e11 ? 3.6e6 : 3600)])).runs).toEqual([
+          iso,
+          '2026-11-19T13:00:00Z',
+        ]);
+      }
+      expect(parseCoverageJson(withRun(['2026-11-19T12:00Z', '2026-11-19T00:00:00.000000000'])).runs).toEqual([iso, '2026-11-19T00:00:00Z']);
+    });
+
+    it('the default is the latest run even when the axis is not in time order', () => {
+      const l = parseCoverageJson(withRun(['2026-11-20T12:00:00Z', '2026-11-19T12:00:00Z']));
+      expect(l.runIndex).toBe(0);
+    });
+
+    it('can sit beside a real z axis; both are selected independently', () => {
+      const c = withRun(['2026-11-19T12:00:00Z', '2026-11-20T12:00:00Z'], [850, 500]);
+      const l = parseCoverageJson(c, { runIndex: 0, levelIndex: 1 });
+      expect(l.levels).toEqual([850, 500]);
+      expect(l.runs).toHaveLength(2);
+      // dims t(2) r(2) z(2): value = t*4 + r*2 + z
+      expect(l.values('v', 0)[0]).toBe(1);
+      expect(l.values('v', 1)[0]).toBe(5);
+      expect(parseCoverageJson(c, { runIndex: 1, levelIndex: 0 }).values('v', 1)[0]).toBe(6);
+      expect(coverageLevels(c)).toEqual({ name: 'pressure', values: ['850', '500'] });
+    });
+
+    it('a single run is exposed but needs no choice', () => {
+      const l = parseCoverageJson(withRun([Date.parse('2026-11-19T12:00:00Z') * 1e6]));
+      expect(l.runs).toEqual(['2026-11-19T12:00:00Z']);
+      expect(l.runIndex).toBe(0);
+      expect(l.levels).toEqual([]);
+    });
   });
 });

@@ -35,15 +35,21 @@ export interface CovJsonLayer extends DataLayer {
   levels: number[];
   /** Index into {@link levels} that {@link DataLayer.values} reads (always 0 when there is no z axis). */
   levelIndex: number;
+  /** Forecast runs (ISO 8601 UTC) of a forecast-reference-time axis, `[]` when there is none. */
+  runs: string[];
+  /** Index into {@link runs} that {@link DataLayer.values} reads (the latest run by default; 0 when there is no run axis). */
+  runIndex: number;
 }
 
 export interface ParseOptions {
   /** Which z-axis level to draw when the domain has several (default 0). Clamped to the axis. */
   levelIndex?: number;
+  /** Which forecast run to draw when the domain has a forecast-reference-time axis (default: the latest). Clamped. */
+  runIndex?: number;
 }
 
 type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
-type Canon = 'x' | 'y' | 'z' | 't' | 'c';
+type Canon = 'x' | 'y' | 'z' | 't' | 'c' | 'r';
 
 const NAME_TO_CANON: Record<string, Canon> = {
   x: 'x',
@@ -71,7 +77,7 @@ const NAME_TO_CANON: Record<string, Canon> = {
 };
 
 /** Order used to guess a range's dimension order when its `axisNames` are unusable. */
-const FALLBACK_ORDER: Canon[] = ['t', 'z', 'y', 'x', 'c'];
+const FALLBACK_ORDER: Canon[] = ['t', 'r', 'z', 'y', 'x', 'c'];
 
 function canonName(name: string): Canon | undefined {
   return NAME_TO_CANON[name.toLowerCase()];
@@ -105,6 +111,21 @@ function expandAxis(a: Json): unknown[] {
   return out;
 }
 
+/** Names (or reference-system ids) of a forecast-reference-time axis: the run a forecast was made from, never a level. */
+const RUN_NAME = /reference_?time|reftime|forecast_reference|^run$/i;
+
+/** Keys of axes that `referencing` identifies as a forecast reference time (by system id). */
+function runKeys(referencing: unknown): Set<string> {
+  const out = new Set<string>();
+  if (!Array.isArray(referencing)) return out;
+  for (const r of referencing as Json[]) {
+    const id = r?.system?.id;
+    if (typeof id !== 'string' || !RUN_NAME.test(id) || !Array.isArray(r?.coordinates)) continue;
+    for (const k of r.coordinates) out.add(String(k));
+  }
+  return out;
+}
+
 /** Reference system types that are not vertical: an axis they cover is x, y or t, never z. */
 const NON_VERTICAL_SYSTEMS = new Set(['GeographicCRS', 'ProjectedCRS', 'TemporalRS']);
 
@@ -133,6 +154,7 @@ function readAxes(
   const axes: Partial<Record<Canon, Axis>> = {};
   const keyToCanon = new Map<string, Canon>();
   const vertical = verticalKeys(domain.referencing ?? fallbackReferencing);
+  const runs = runKeys(domain.referencing ?? fallbackReferencing);
   const add = (key: string, a: Json, c: Canon, isComposite: boolean): void => {
     let cache: unknown[] | undefined;
     const axis: Axis = {
@@ -154,7 +176,7 @@ function readAxes(
     if (!a || typeof a !== 'object') continue;
     const isComposite = Array.isArray(a.values) && (a.dataType === 'tuple' || Array.isArray(a.coordinates));
     if (a.dataType === 'polygon') throw new CovJsonError('Polygon axes are not supported');
-    const c: Canon | undefined = isComposite ? 'c' : canonName(key);
+    const c: Canon | undefined = isComposite ? 'c' : RUN_NAME.test(key) || runs.has(key) ? 'r' : canonName(key);
     if (!c) {
       if (vertical.has(key)) unnamed.push(key);
       continue; // ignore unknown axes
@@ -380,8 +402,16 @@ export function normaliseTime(t: string): string {
   return `${secs}${ms === '000' ? '' : `.${ms}`}${zone ? (zone.toUpperCase() === 'Z' ? 'Z' : zone) : 'Z'}`;
 }
 
-/** Fill `out` with the values of one range for time step `ti` (and z level `zi`). */
-function extract(part: Part, p: { raw: unknown[]; dims: Dim[] }, grid: boolean, ti: number, zi: number, out: Float32Array): void {
+/** Fill `out` with the values of one range for time step `ti` (and z level `zi`, forecast run `ri`). */
+function extract(
+  part: Part,
+  p: { raw: unknown[]; dims: Dim[] },
+  grid: boolean,
+  ti: number,
+  zi: number,
+  ri: number,
+  out: Float32Array,
+): void {
   let base = 0;
   let stT = 0;
   let stC = 0;
@@ -390,6 +420,7 @@ function extract(part: Part, p: { raw: unknown[]; dims: Dim[] }, grid: boolean, 
   for (const d of p.dims) {
     if (d.canon === 't') stT = d.stride;
     else if (d.canon === 'z') base += zi * d.stride;
+    else if (d.canon === 'r') base += ri * d.stride;
     else if (d.canon === 'c') stC = d.stride;
     else if (d.canon === 'y') stY = d.stride;
     else stX = d.stride;
@@ -407,6 +438,17 @@ function extract(part: Part, p: { raw: unknown[]; dims: Dim[] }, grid: boolean, 
   } else {
     for (let s = 0; s < part.spatial; s++) out[s] = num(raw[base + s * stC]);
   }
+}
+
+/** A forecast-reference-time value as ISO 8601 UTC: numbers are epoch ns / µs / ms / s (told apart by magnitude). */
+function runTime(v: unknown): string {
+  if (typeof v === 'number' && Number.isFinite(v)) {
+    const a = Math.abs(v);
+    const ms = a >= 1e17 ? v / 1e6 : a >= 1e14 ? v / 1e3 : a >= 1e11 ? v : v * 1e3;
+    const d = new Date(Math.round(ms));
+    return Number.isNaN(d.getTime()) ? String(v) : d.toISOString().replace('.000Z', 'Z');
+  }
+  return normaliseTime(String(v));
 }
 
 /** How a collection of per-time coverages over one point set is merged into a single layer with N times. */
@@ -585,6 +627,26 @@ export function parseCoverageJson(json: unknown, options: ParseOptions = {}): Co
   const levels = zAxis ? zAxis.values.map((v) => Number(v)) : [];
   const levelIndex = zAxis ? Math.min(Math.max(Math.trunc(options.levelIndex ?? 0) || 0, 0), levels.length - 1) : 0;
 
+  const rAxis = first.axes.r;
+  const runs = rAxis ? rAxis.values.map(runTime) : [];
+  let runIndex = 0;
+  if (rAxis) {
+    if (options.runIndex === undefined) {
+      // Default: the latest run (by time; the axis order is not guaranteed).
+      runIndex = runs.length - 1;
+      let best = Number.NEGATIVE_INFINITY;
+      runs.forEach((r, i) => {
+        const t = Date.parse(r);
+        if (Number.isFinite(t) && t >= best) {
+          best = t;
+          runIndex = i;
+        }
+      });
+    } else {
+      runIndex = Math.min(Math.max(Math.trunc(options.runIndex) || 0, 0), runs.length - 1);
+    }
+  }
+
   // ---- Geometry and parts -----------------------------------------------------------------
   let coords: Float64Array | GridSpec;
   const parts: Part[] = [];
@@ -702,7 +764,7 @@ export function parseCoverageJson(json: unknown, options: ParseOptions = {}): Co
     for (const s of sliceOf(ti)) {
       const range = s.part.ranges.get(param)!;
       const view = out.subarray(at, at + s.part.spatial);
-      extract(s.part, range, isGrid, s.ti, levelIndex, view);
+      extract(s.part, range, isGrid, s.ti, levelIndex, runIndex, view);
       at += s.part.spatial;
     }
     return out;
@@ -727,7 +789,7 @@ export function parseCoverageJson(json: unknown, options: ParseOptions = {}): Co
   };
 
   // ---- Parameter info (min/max over all times, ignoring NaN) -------------------------------
-  const zMulti = levels.length > 1;
+  const zMulti = levels.length > 1 || runs.length > 1;
   const parameters: ParamInfo[] = rangeKeys.map((key) => {
     let min = Infinity;
     let max = -Infinity;
@@ -745,7 +807,7 @@ export function parseCoverageJson(json: unknown, options: ParseOptions = {}): Co
         buf.fill(NaN);
         let at = 0;
         for (const s of sliceOf(ti)) {
-          extract(s.part, s.part.ranges.get(key)!, isGrid, s.ti, levelIndex, buf.subarray(at, at + s.part.spatial));
+          extract(s.part, s.part.ranges.get(key)!, isGrid, s.ti, levelIndex, runIndex, buf.subarray(at, at + s.part.spatial));
           at += s.part.spatial;
         }
         for (let i = 0; i < buf.length; i++) if (Number.isFinite(buf[i])) scan(buf[i]);
@@ -762,7 +824,7 @@ export function parseCoverageJson(json: unknown, options: ParseOptions = {}): Co
     };
   });
 
-  return { kind, parameters, times, coords, values, levels, levelIndex };
+  return { kind, parameters, times, coords, values, levels, levelIndex, runs, runIndex };
 }
 
 /**
