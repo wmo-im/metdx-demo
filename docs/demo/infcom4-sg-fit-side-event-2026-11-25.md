@@ -349,7 +349,13 @@ chunk      init_time       lead_h  url                                          
     ![Canadian VOF pipeline: from NWP models to OGC API – EDR](images/canadian-vof-pipeline.png)
 
 12. **Maps:**
-    - **==TODO==** _Add section for Maps request - currently giving HTTP 500 responses_
+    - Zoom in on Canada
+    - The Map service returns an image rendered from the data from a specific model run (or “instance”) on the server - we’ll leave the “instance” at the default (latest) run
+    - Select the "Date" and "Time" that you want the image for - these values are provided as options in the UI, driven by the metadata in the collection document
+    - Select "Parameter" (e.g., AirTemp)
+    - Click “Draw BBOX” and then draw the area on the map, and click “FETCH”
+    - The server builds the image and sends it to the client for display
+    - You can see the URL used for the Maps request at the bottom of the page
 13. **EDR:**
     - Zoom into the Great Lakes area
     - In the query builder only "POSITION" is available: this EDR endpoint supports only position queries (plus `instances`, its model runs). It's the same `data_queries` metadata you saw for ECMWF in point 5; open the "OGC EDR" `collection` link to compare.
