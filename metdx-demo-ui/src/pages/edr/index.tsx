@@ -207,6 +207,29 @@ function queryHasZ(target: string): boolean {
   return q >= 0 && /(^|&)z=/.test(target.slice(q + 1).split('#')[0]);
 }
 
+/**
+ * The level a query URL asked for (`z=85000`; the first of a `z=a,b` list), `null` without a plain numeric `z`
+ * (also for ranges and repeating intervals). Servers that ignore `z` answer with every level: the result panel
+ * uses this to start at the requested one.
+ */
+function queryZ(target: string): number | null {
+  const q = target.indexOf('?');
+  if (q < 0) return null;
+  for (const pair of target.slice(q + 1).split('#')[0].split('&')) {
+    if (!pair.startsWith('z=')) continue;
+    let v = pair.slice(2);
+    try {
+      v = decodeURIComponent(v);
+    } catch {
+      /* keep it raw */
+    }
+    const first = v.split(',')[0].trim();
+    const n = first === '' ? NaN : Number(first);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
 function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
   const { id: recordId } = useParams();
   const map = useMap();
@@ -702,7 +725,7 @@ function EdrBuilder({ collectionUrl }: { collectionUrl: string }) {
       // nothing about what else exists and would replace the ECMWF fallback list. Never shrinks a longer learned list.
       const lv = queryHasZ(target) ? null : coverageLevels(data);
       if (lv && lv.values.length >= 2) setLearnedLevels((prev) => (!prev || lv.values.length > prev.values.length ? lv : prev));
-      setFetched({ id: ++fetchSeq.current, data, text, filename: fileNameFor(target) });
+      setFetched({ id: ++fetchSeq.current, data, text, filename: fileNameFor(target), requestedLevel: queryZ(target) });
       setStatus({ severity: 'success', text: `Response received (${text.length.toLocaleString()} chars)` });
     } catch (e) {
       if (!current()) return;

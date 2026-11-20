@@ -464,6 +464,23 @@ describe('metadata parsing (fixtures)', () => {
     expect(parseTemporal(instance)).toEqual({ start: '2026-10-19T00:00:00Z', end: '2026-10-29T00:00:00Z' });
     expect(parseTemporal({})).toEqual({ start: null, end: null });
   });
+  it('parseTemporal reads the nested pair, the flat pair (Met Office) and open ends', () => {
+    const t = (interval: unknown) => parseTemporal({ extent: { temporal: { interval } } });
+    const S = '2026-11-18T12:00:00Z';
+    const E = '2026-11-19T12:00:00Z';
+    expect(t([[S, E]])).toEqual({ start: S, end: E });
+    expect(t([S, E])).toEqual({ start: S, end: E });
+    expect(t([[S, E], ['2027-01-01T00:00:00Z', '2027-02-01T00:00:00Z']])).toEqual({ start: S, end: E });
+    expect(t([null, E])).toEqual({ start: null, end: E });
+    expect(t([S, null])).toEqual({ start: S, end: null });
+    expect(t([[null, E]])).toEqual({ start: null, end: E });
+    expect(t([S, '..'])).toEqual({ start: S, end: null });
+    expect(t(['..', E])).toEqual({ start: null, end: E });
+    expect(t([null, null])).toEqual({ start: null, end: null });
+    expect(t([])).toEqual({ start: null, end: null });
+    expect(t('nope')).toEqual({ start: null, end: null });
+    expect(parseTemporal({ extents: { temporal: { interval: [S, E] } } })).toEqual({ start: S, end: E });
+  });
   it('availableModes filters advertised modes by what the UI implements', () => {
     expect(availableModes(['position', 'area', 'cube'])).toEqual(['position', 'area', 'cube']);
     expect(availableModes(['cube'])).toEqual(['cube']);

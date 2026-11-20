@@ -7,7 +7,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
 import { useMap, useMapEngine } from '../../shell';
 import { Legend } from '../../shell/Legend';
-import { CovJsonError, parseCoverageJson, pointSeries, type CovJsonLayer } from '../../lib/covjson';
+import { CovJsonError, coverageLevels, parseCoverageJson, pointSeries, type CovJsonLayer } from '../../lib/covjson';
 import { DEFAULT_COLOUR_SCALE, TooLargeToDraw, isGridSpec, type DataStyle } from '../../lib/covjsonTypes';
 import { MAX_CONTOUR_POINTS, contourLevels, contourSupport } from '../../lib/contour';
 import type { TimeSeries } from '../../lib/edr';
@@ -20,6 +20,16 @@ export interface FetchedResult {
   data: unknown;
   text: string;
   filename: string;
+  /** The numeric `z` the request asked for, if any: the panel starts at that level when the response lists it. */
+  requestedLevel?: number | null;
+}
+
+/** Index of the requested level in the response's z axis (exact numeric equality); 0 when not asked for or not listed. */
+function initialLevelIndex(result: FetchedResult): number {
+  const z = result.requestedLevel;
+  if (z == null) return 0;
+  const i = coverageLevels(result.data)?.values.findIndex((v) => Number(v) === z) ?? -1;
+  return i < 0 ? 0 : i;
 }
 
 const MAX_CHARTS = 8;
@@ -78,7 +88,7 @@ export function ResultPanel({ result, mode, onViewJson }: Props) {
   const [renderer, setRenderer] = useState<'builtin' | 'coverage'>('builtin');
   const [coverageError, setCoverageError] = useState<string | null>(null);
   const useCoverage = canCoverage && renderer === 'coverage';
-  const [levelIndex, setLevelIndex] = useState(0);
+  const [levelIndex, setLevelIndex] = useState(() => initialLevelIndex(result));
   const parsed = useMemo(() => parse(result.data, levelIndex), [result.data, levelIndex]);
   const layer = parsed.layer;
 

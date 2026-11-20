@@ -875,15 +875,18 @@ export interface EdrCollectionInfo {
 
 type Json = Record<string, any>;
 
-/** Temporal extent from `extent` / `extents` (collections and instances). */
+/**
+ * Temporal extent from `extent` / `extents` (collections and instances). `interval` is `[[start, end], ...]` (the first
+ * pair is used) or, as the Met Office sends it, a flat `[start, end]`; `null` / `".."` / empty are open ends.
+ */
 export function parseTemporal(data: unknown): TemporalExtent {
   const d = (data ?? {}) as Json;
   const ext = (d.extents ?? d.extent ?? {}) as Json;
   const interval = ext.temporal?.interval;
-  const first = Array.isArray(interval) && Array.isArray(interval[0]) ? interval[0] : [];
+  const first: unknown[] = !Array.isArray(interval) ? [] : Array.isArray(interval[0]) ? interval[0] : interval;
   const s = first[0];
   const e = first[1];
-  return { start: typeof s === 'string' && s ? s : null, end: typeof e === 'string' && e ? e : null };
+  return { start: typeof s === 'string' && s && s !== '..' ? s : null, end: typeof e === 'string' && e && e !== '..' ? e : null };
 }
 
 /** Vertical extent of a collection or instance: the offered levels, as the server writes them. */

@@ -104,6 +104,31 @@ describe('datetimes', () => {
     expect(defaultInstance(['20261117T12Z', '20261118T00Z', '20261119T00Z'], now)).toBe('20261118T00Z');
   });
 
+  it('reads zone-less nanosecond datetimes (MSC schema) as UTC whatever the viewer time zone', () => {
+    const dts = [
+      '2026-11-18T22:00:00.000000000',
+      '2026-11-18T23:00:00.000000000',
+      '2026-11-19T00:00:00.000000000',
+      '2026-11-19T03:00:00.000000000',
+    ];
+    const expected = dts.slice(1); // strings come back exactly as listed
+    const prev = process.env.TZ;
+    try {
+      for (const tz of ['UTC', 'Asia/Tokyo', 'America/Los_Angeles']) {
+        process.env.TZ = tz;
+        expect(filterDatetimes(dts, '20261118T23Z'), tz).toEqual(expected);
+      }
+    } finally {
+      if (prev === undefined) delete process.env.TZ;
+      else process.env.TZ = prev;
+    }
+    // mixed forms: zoned, zone-less, space-separated
+    expect(filterDatetimes(['2026-11-18T22:59:59', '2026-11-18T23:00:00Z', '2026-11-19 00:00:00.123456789'], '20261118T23Z')).toEqual([
+      '2026-11-18T23:00:00Z',
+      '2026-11-19 00:00:00.123456789',
+    ]);
+  });
+
   it('defaults to today\'s datetime, else last, else midnight', () => {
     const now = new Date('2026-10-19T08:00:00Z');
     expect(defaultDatetime(['2026-10-19T06:00:00Z', '2026-10-19T12:00:00Z'], now)).toBe('2026-10-19T06:00:00Z');

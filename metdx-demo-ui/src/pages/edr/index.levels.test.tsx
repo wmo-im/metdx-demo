@@ -7,6 +7,7 @@ import { createMockFetch } from '../../lib/mockFetch';
 import metOffice from '../../../test/fixtures/edr/metoffice-pressure-position.json';
 import livePosition from '../../../test/fixtures/edr/live-position.json';
 import { COMMON_LEVELS } from '../../lib/edr';
+import type { CovJsonLayer } from '../../lib/covjson';
 import { COL, fetchBtn, map, ready, renderPage, StubMap, urlBox } from '../../../test/edrPageHarness';
 import EdrPage from './index';
 import { MapProvider, RequestBar, RequestBarProvider, ResultDialog } from '../../shell';
@@ -287,5 +288,67 @@ describe('EDR page: vertical level chooser', () => {
     await user.click(screen.getByRole('button', { name: 'to mo' }));
     await ready();
     expect(screen.queryByText('Vertical level')).not.toBeInTheDocument();
+  });
+});
+
+describe('EDR page: result level selector', () => {
+  const levels = metOffice.domain.axes.pressure.values;
+  const series = (level: number) => metOffice.ranges.air_temperature.values.filter((_, i) => i % levels.length === level);
+
+  /** The server ignores `z` and answers with all 37 levels (as the Met Office does). */
+  async function queryWith(zChoice: string | null) {
+    const user = userEvent.setup({ delay: null });
+    renderPage(MO, metOfficeLike({ vertical: { values: [100000, 85000, 50000], vrs: 'Pa' } }));
+    await ready();
+    await user.click(screen.getByRole('button', { name: /^air_temperature/ }));
+    await user.click(screen.getByRole('button', { name: 'Draw position' }));
+    if (zChoice) {
+      await user.click(await screen.findByLabelText('Vertical level (Pa)'));
+      await user.click(screen.getByRole('option', { name: zChoice }));
+      await waitFor(() => expect(urlBox().value).toContain(`&z=${zChoice}&`));
+    }
+    await waitFor(() => expect(fetchBtn()).toBeEnabled());
+    await user.click(fetchBtn());
+    await screen.findByTestId('edr-result');
+    await waitFor(() => expect(map.drawn.length).toBeGreaterThan(0));
+    expect(queries).toHaveLength(1);
+    expect(queries[0]).toContain(zChoice ? `&z=${zChoice}&` : '&parameter-name=air_temperature&');
+    if (!zChoice) expect(queries[0]).not.toContain('&z=');
+  }
+
+  it('starts at the requested level when the server ignores z and returns every level', async () => {
+    await queryWith('85000');
+    const layer = map.drawn.at(-1) as CovJsonLayer;
+    expect(layer.levels).toHaveLength(37);
+    expect(layer.levelIndex).toBe(5);
+    expect(layer.levels[layer.levelIndex]).toBe(85000);
+    expect(screen.getByRole('combobox', { name: 'Level' })).toHaveTextContent('85000');
+    // the series shown is that of the 85000 Pa level
+    const want = series(5);
+    expect(layer.times.map((_, ti) => layer.values('air_temperature', ti)[0])).toEqual(want);
+    expect(want).not.toEqual(series(0));
+  });
+
+  it('starts at the first level when the query had no z', async () => {
+    await queryWith(null);
+    const layer = map.drawn.at(-1) as CovJsonLayer;
+    expect(layer.levelIndex).toBe(0);
+    expect(screen.getByRole('combobox', { name: 'Level' })).toHaveTextContent('100000');
+    expect(layer.times.map((_, ti) => layer.values('air_temperature', ti)[0])).toEqual(series(0));
+  });
+
+  it('starts at the first level when the requested level is not in the response', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage(MO, metOfficeLike({ vertical: { values: [100000, 12345], vrs: 'Pa' } }));
+    await ready();
+    await user.click(screen.getByRole('button', { name: /^air_temperature/ }));
+    await user.click(screen.getByRole('button', { name: 'Draw position' }));
+    await user.click(await screen.findByLabelText('Vertical level (Pa)'));
+    await user.click(screen.getByRole('option', { name: '12345' }));
+    await waitFor(() => expect(urlBox().value).toContain('&z=12345&'));
+    await user.click(fetchBtn());
+    await screen.findByTestId('edr-result');
+    await waitFor(() => expect(map.drawn.length).toBeGreaterThan(0));
+    expect((map.drawn.at(-1) as CovJsonLayer).levelIndex).toBe(0);
   });
 });

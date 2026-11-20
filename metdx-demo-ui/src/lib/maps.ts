@@ -82,14 +82,26 @@ export function defaultInstance(instances: string[], now: Date = new Date()): st
   return instances.find((i) => instanceIso(i).slice(0, 10) === today) ?? instances[instances.length - 1];
 }
 
+/**
+ * Epoch ms of an ISO 8601 datetime, NaN when it is not one. A value without a zone (`2026-11-19T00:00:00.000000000`,
+ * as the MSC schema lists them) is read as UTC rather than viewer-local time; fractional digits beyond
+ * milliseconds are trimmed, which `Date.parse` does not reliably accept.
+ */
+function parseUtcMs(value: string): number {
+  let s = value.trim().replace(' ', 'T');
+  s = s.replace(/(\.\d{3})\d+/, '$1');
+  if (/T\d{2}(:\d{2}(:\d{2}(\.\d+)?)?)?$/.test(s)) s += 'Z';
+  return Date.parse(s);
+}
+
 /** Datetimes at or after the instance (instants compared); all of them when the instance is not a datetime. */
 export function filterDatetimes(datetimes: string[], instance: string | undefined): string[] {
   if (!instance || !datetimes.length) return datetimes;
   const inst = instanceIso(instance);
-  const instMs = Date.parse(inst);
+  const instMs = parseUtcMs(inst);
   if (Number.isNaN(instMs)) return datetimes;
   return datetimes.filter((dt) => {
-    const ms = Date.parse(dt);
+    const ms = parseUtcMs(dt);
     return Number.isNaN(ms) ? dt >= inst : ms >= instMs;
   });
 }
