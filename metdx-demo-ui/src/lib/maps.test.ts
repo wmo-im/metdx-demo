@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  LEVELS,
   LruCache,
   bboxFromGeometry,
   bboxFromUrl,
@@ -10,6 +11,7 @@ import {
   defaultDatetime,
   defaultInstance,
   filterDatetimes,
+  mapLevelChoice,
   parseBbox,
   parseSchema,
   pickDatetime,
@@ -178,5 +180,33 @@ describe('LruCache', () => {
     expect(evicted).toEqual(['b']);
     expect(c.get('b')).toBeUndefined();
     expect(c.size).toBe(2);
+  });
+});
+
+describe('mapLevelChoice', () => {
+  const vert = (values: string[], vrs: string | null = null) => ({ values, interval: null, vrs });
+
+  it('is null without advertised levels and for a non-level parameter', () => {
+    expect(mapLevelChoice(null, '2t')).toBeNull();
+    expect(mapLevelChoice(null, 'AirTemp')).toBeNull();
+    expect(mapLevelChoice(null, 'z')).toBeNull(); // geopotential is not a pressure-level parameter
+    expect(mapLevelChoice(null, '')).toBeNull();
+    expect(mapLevelChoice(vert([]), '2t')).toBeNull();
+  });
+
+  it('offers the hPa LEVELS for ECMWF pressure-level parameters', () => {
+    const c = mapLevelChoice(null, 't');
+    expect(c).toEqual({ source: 'default', label: 'Level (hPa)', values: LEVELS, emptyLabel: 'Surface' });
+    expect(mapLevelChoice(vert([]), 'gh')?.source).toBe('default');
+  });
+
+  it('prefers the advertised values, labelled by the short vrs', () => {
+    expect(mapLevelChoice(vert(['1', '2'], 'http://x/y#depth'), 't')).toEqual({
+      source: 'extent',
+      label: 'Level (depth)',
+      values: ['1', '2'],
+      emptyLabel: 'None',
+    });
+    expect(mapLevelChoice(vert(['1']), '2t')?.label).toBe('Level');
   });
 });

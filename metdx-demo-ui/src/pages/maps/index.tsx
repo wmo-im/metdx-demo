@@ -23,7 +23,6 @@ import {
   DEFAULT_BBOX_TEXT,
   DEFAULT_HEIGHT,
   DEFAULT_WIDTH,
-  LEVELS,
   LruCache,
   WORLD_BBOX,
   bboxFromGeometry,
@@ -35,6 +34,7 @@ import {
   defaultInstance,
   filterDatetimes,
   formatBbox,
+  mapLevelChoice,
   parseBbox,
   parseSchema,
   pickDatetime,
@@ -42,7 +42,7 @@ import {
   schemaUrl,
   type MapSchema,
 } from '../../lib/maps';
-import { availableDates, splitIso, timesOnDate } from '../../lib/edr';
+import { availableDates, parseVerticalExtent, splitIso, timesOnDate, type VerticalExtent } from '../../lib/edr';
 import { PickField } from '../../shell/PickField';
 
 type Status = { severity: 'info' | 'success' | 'error' | 'warning'; text: string } | null;
@@ -78,6 +78,7 @@ export default function MapsPage() {
   const [mapUrl, setMapUrl] = useState('');
   const [title, setTitle] = useState('');
   const [extent, setExtent] = useState<BBox | null>(null);
+  const [vertical, setVertical] = useState<VerticalExtent | null>(null);
   const [schema, setSchema] = useState<MapSchema>(EMPTY_SCHEMA);
   const [loadingMeta, setLoadingMeta] = useState(!!col);
   const [metaError, setMetaError] = useState('');
@@ -129,6 +130,8 @@ export default function MapsPage() {
       setTitle(typeof collection?.title === 'string' ? collection.title : '');
       const ext = collectionExtent(collection);
       setExtent(ext);
+      setVertical(parseVerticalExtent(collection));
+      setLevel('');
       map.showExtent(ext);
       try {
         const parsed = parseSchema(await fetchJson(schemaUrl(col), { signal: ctrl.signal }));
@@ -176,6 +179,15 @@ export default function MapsPage() {
   const selected = datetimeOptions.includes(datetime) ? splitIso(datetime) : { date: '', time: '' };
   const timeOptions = useMemo(() => timesOnDate(datetimeOptions, selected.date), [datetimeOptions, selected.date]);
 
+  // The level chooser exists only when the collection advertises levels or the parameter is a pressure-level one.
+  const levelChoice = useMemo(() => mapLevelChoice(vertical, parameter), [vertical, parameter]);
+  const levelOffered = !!levelChoice && levelChoice.values.includes(level);
+  const levelSent = levelOffered ? level : '';
+  // Hidden chooser or a level no longer offered: forget it so it is not sent (nor reappears later).
+  useEffect(() => {
+    if (level && !levelOffered) setLevel('');
+  }, [level, levelOffered]);
+
   const requestUrl = useMemo(
     () =>
       mapUrl
@@ -187,10 +199,10 @@ export default function MapsPage() {
             datetime,
             fallbackDatetime: defaultDatetime(schema.datetimes),
             parameter,
-            level,
+            level: levelSent,
           })
         : '',
-    [mapUrl, bboxText, width, height, datetime, schema.datetimes, parameter, level],
+    [mapUrl, bboxText, width, height, datetime, schema.datetimes, parameter, levelSent],
   );
 
   const { setUrl } = bar;
@@ -381,14 +393,16 @@ export default function MapsPage() {
           </TextField>
         )}
 
-        <TextField select size="small" label="Level (hPa)" value={level} onChange={(e) => setLevel(e.target.value)}>
-          <MenuItem value="">Surface</MenuItem>
-          {LEVELS.map((v) => (
-            <MenuItem key={v} value={v}>
-              {v}
-            </MenuItem>
-          ))}
-        </TextField>
+        {levelChoice && (
+          <TextField select size="small" label={levelChoice.label} value={levelSent} onChange={(e) => setLevel(e.target.value)}>
+            <MenuItem value="">{levelChoice.emptyLabel}</MenuItem>
+            {levelChoice.values.map((v) => (
+              <MenuItem key={v} value={v}>
+                {v}
+              </MenuItem>
+            ))}
+          </TextField>
+        )}
 
         <TextField
           size="small"

@@ -4,7 +4,7 @@
  * `build_url`): `{map}?f=png&bbox=..&width=..&height=..&datetime=..&parameter-name=..&subset=z(..)`.
  * Values are emitted verbatim (not percent-encoded), exactly like Flet.
  */
-import { instanceToIso, splitIso } from './edr';
+import { instanceToIso, needsLevel, splitIso, type VerticalExtent } from './edr';
 import type { BBox, Geometry } from './types';
 
 export const OGC_MAP_REL = 'http://www.opengis.net/def/rel/ogc/1.0/map';
@@ -16,6 +16,31 @@ export const DEFAULT_HEIGHT = '600';
 
 /** Pressure levels offered by the Flet app ("" = surface). */
 export const LEVELS = ['1000', '925', '850', '700', '500', '300', '250', '200', '100', '50'] as const;
+
+/** The "Level" chooser of the Maps page: its label, options and what the empty option is called. */
+export interface MapLevelChoice {
+  source: 'extent' | 'default';
+  label: string;
+  values: readonly string[];
+  /** Label of the empty option (no `subset=z`). */
+  emptyLabel: string;
+}
+
+/**
+ * Where the level chooser gets its options, like the EDR page: the levels the collection advertises in
+ * `extent.vertical` (labelled by its `vrs`, not assumed to be hPa), else hPa {@link LEVELS} when the
+ * selected parameter is an ECMWF pressure-level one. `null` = no chooser (and no `subset=z`).
+ */
+export function mapLevelChoice(vertical: VerticalExtent | null, parameter: string): MapLevelChoice | null {
+  if (vertical && vertical.values.length) {
+    const unit = vertical.vrs ? (vertical.vrs.split(/[/#]/).filter(Boolean).pop() ?? vertical.vrs) : null;
+    return { source: 'extent', label: unit ? `Level (${unit})` : 'Level', values: vertical.values, emptyLabel: 'None' };
+  }
+  if (needsLevel(parameter ? [parameter] : [])) {
+    return { source: 'default', label: 'Level (hPa)', values: LEVELS, emptyLabel: 'Surface' };
+  }
+  return null;
+}
 
 /** Number of rendered maps kept (Flet: `_MAP_CACHE_MAX`). */
 export const MAP_CACHE_MAX = 12;

@@ -52,6 +52,29 @@ afterEach(() => {
 
 const urlBox = () => screen.getByLabelText('Request URL') as HTMLInputElement;
 
+const SCHEMA_DOC_URL = 'https://polytope-edr.lumi.apps.dte.destination-earth.eu/collections/operational_map_server/schema?f=json';
+
+/** Serve a collection document (with an optional `extent.vertical`) and a schema with these parameters. */
+function withDocs(opts: { vertical?: unknown; schemaParams?: string[] } = {}) {
+  const base = mock;
+  setFetchImpl(async (input, init) => {
+    const url = unproxyUrl(input);
+    if (url === COL && opts.vertical !== undefined) {
+      const doc = (await (await base(input, init)).json()) as { extent: Record<string, unknown> };
+      doc.extent = { ...doc.extent, vertical: opts.vertical };
+      return new Response(JSON.stringify(doc), { headers: { 'content-type': 'application/json' } });
+    }
+    if (url === SCHEMA_DOC_URL && opts.schemaParams) {
+      // Keep the fixture's instance_id/datetime, replace its data parameters.
+      const doc = (await (await base(input, init)).json()) as { properties: Record<string, unknown> };
+      const meta = Object.fromEntries(Object.entries(doc.properties).filter(([k]) => ['geometry', 'instance_id', 'datetime'].includes(k)));
+      const params = Object.fromEntries(opts.schemaParams.map((p) => [p, { type: 'number' }]));
+      return new Response(JSON.stringify({ properties: { ...meta, ...params } }), { headers: { 'content-type': 'application/json' } });
+    }
+    return base(input, init);
+  });
+}
+
 describe('MapsPage', () => {
   it('fills instance/datetime/parameter from the schema and builds the URL', async () => {
     setup();
@@ -69,8 +92,9 @@ describe('MapsPage', () => {
 
   it('updates the URL for bbox, size and level', async () => {
     const user = userEvent.setup({ delay: null });
+    withDocs({ schemaParams: ['t'] });
     setup();
-    await waitFor(() => expect(urlBox().value).toContain('parameter-name=2t'));
+    await waitFor(() => expect(urlBox().value).toContain('parameter-name=t'));
     const bbox = screen.getByLabelText(/BBOX \(minLon/);
     await user.clear(bbox);
     await user.type(bbox, '-10,30,40,60');
@@ -80,7 +104,7 @@ describe('MapsPage', () => {
     await user.click(screen.getByLabelText('Level (hPa)'));
     await user.click(await screen.findByRole('option', { name: '500' }));
     expect(urlBox().value).toBe(
-      `${MAP}?f=png&bbox=-10,30,40,60&width=400&height=600&datetime=2026-10-19T00:00:00Z&parameter-name=2t&subset=z(500)`,
+      `${MAP}?f=png&bbox=-10,30,40,60&width=400&height=600&datetime=2026-10-19T00:00:00Z&parameter-name=t&subset=z(500)`,
     );
   });
 
@@ -295,5 +319,75 @@ describe('MapsPage: Date and Time dropdowns', () => {
     expect(urlBox().value).toMatch(/datetime=\d{4}-\d{2}-\d{2}T00:00:00Z&/);
     await user.type(field, '2020-05-06T12:00:00Z');
     expect(urlBox().value).toContain('datetime=2020-05-06T12:00:00Z&');
+  });
+});
+
+describe('MapsPage: Level chooser', () => {
+  const levelField = () => screen.queryByRole('combobox', { name: /^Level/ });
+  const optionsOf = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(levelField()!);
+    const opts = within(await screen.findByRole('listbox')).getAllByRole('option').map((o) => o.textContent);
+    await user.keyboard('{Escape}');
+    return opts;
+  };
+  const ready = (param: string) => waitFor(() => expect(urlBox().value).toContain(`parameter-name=${param}`));
+
+  it('is hidden for a collection without extent.vertical and a non-level parameter', async () => {
+    setup(); // fixture: no vertical extent, first parameter 2t
+    await ready('2t');
+    expect(levelField()).toBeNull();
+    expect(screen.queryByLabelText('Level (hPa)')).toBeNull();
+    expect(urlBox().value).not.toContain('subset=');
+  });
+
+  it('shows the hPa levels for an ECMWF pressure-level parameter (t)', async () => {
+    const user = userEvent.setup({ delay: null });
+    withDocs({ schemaParams: ['t', '2t'] });
+    setup();
+    await ready('t');
+    expect(screen.getByRole('combobox', { name: 'Level (hPa)' })).toBeInTheDocument();
+    expect(await optionsOf(user)).toEqual(['Surface', '1000', '925', '850', '700', '500', '300', '250', '200', '100', '50']);
+  });
+
+  it('shows the levels the collection advertises in extent.vertical, labelled by its vrs', async () => {
+    const user = userEvent.setup({ delay: null });
+    withDocs({ vertical: { interval: [[0, 10]], values: ['0', '5', '10'], vrs: 'http://www.opengis.net/def/crs/EPSG/0/5715' } });
+    setup();
+    await ready('2t'); // not a level parameter, yet the collection advertises levels
+    expect(screen.getByRole('combobox', { name: 'Level (5715)' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Level (hPa)')).toBeNull();
+    expect(await optionsOf(user)).toEqual(['None', '0', '5', '10']);
+    await user.click(levelField()!);
+    await user.click(await screen.findByRole('option', { name: '5' }));
+    expect(urlBox().value).toContain('&subset=z(5)');
+  });
+
+  it('ignores an extent.vertical without values', async () => {
+    withDocs({ vertical: { interval: [[0, 10]] } });
+    setup();
+    await ready('2t');
+    expect(levelField()).toBeNull();
+  });
+
+  it('clears the level and sends no subset=z after switching from t to 2t (and back)', async () => {
+    const user = userEvent.setup({ delay: null });
+    withDocs({ schemaParams: ['t', '2t'] });
+    setup();
+    await ready('t');
+    await user.click(screen.getByRole('combobox', { name: 'Level (hPa)' }));
+    await user.click(await screen.findByRole('option', { name: '500' }));
+    expect(urlBox().value).toContain('parameter-name=t&subset=z(500)');
+
+    await user.click(screen.getByRole('combobox', { name: 'Parameter' }));
+    await user.click(await screen.findByRole('option', { name: '2t' }));
+    expect(urlBox().value).toContain('parameter-name=2t');
+    expect(urlBox().value).not.toContain('subset=');
+    expect(levelField()).toBeNull();
+
+    await user.click(screen.getByRole('combobox', { name: 'Parameter' }));
+    await user.click(await screen.findByRole('option', { name: 't' }));
+    expect(urlBox().value).toContain('parameter-name=t');
+    expect(urlBox().value).not.toContain('subset=');
+    expect(screen.getByRole('combobox', { name: 'Level (hPa)' })).not.toHaveTextContent(/\d/); // back on the empty (Surface) option
   });
 });
