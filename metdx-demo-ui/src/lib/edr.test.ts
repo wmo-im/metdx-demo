@@ -435,6 +435,10 @@ describe('metadata parsing (fixtures)', () => {
     expect(c.modes).toEqual(['position', 'area']);
     expect(c.unknownQueries).toEqual(['items']);
   });
+  it('drops datetime and instance_id from the parameters', () => {
+    const c = parseCollection({ parameter_names: { datetime: {}, TMP: {}, instance_id: {}, WIND: {} } });
+    expect(c.params.map((p) => p.id)).toEqual(['TMP', 'WIND']);
+  });
   it('unit symbol forms', () => {
     const c = parseCollection({ parameter_names: { a: { unit: { symbol: { value: 'K' } } }, b: { unit: { symbol: 'm' } } } });
     expect(c.params.map((p) => p.unit)).toEqual(['K', 'm']);

@@ -957,17 +957,22 @@ export function paramLabel(p: EdrParam): string {
   return s;
 }
 
+/** Names some servers (MSC) list in `parameter_names` although they are not data parameters (cf. Maps' SKIP_KEYS). */
+const NON_PARAMETER_NAMES = new Set(['datetime', 'instance_id']);
+
 export function parseCollection(data: unknown): EdrCollectionInfo {
   const d = (data ?? {}) as Json;
   const queries = Object.keys((d.data_queries ?? {}) as Json);
   const modes = EDR_MODES.filter((m) => queries.includes(m));
   // `instances` is not a query type (it only advertises the instance list).
   const unknownQueries = queries.filter((q) => !isEdrMode(q) && q !== 'instances');
-  const params: EdrParam[] = Object.entries((d.parameter_names ?? {}) as Record<string, Json>).map(([id, p]) => ({
-    id,
-    name: p?.observedProperty?.label?.en ?? id,
-    unit: unitOf(p ?? {}),
-  }));
+  const params: EdrParam[] = Object.entries((d.parameter_names ?? {}) as Record<string, Json>)
+    .filter(([id]) => !NON_PARAMETER_NAMES.has(id))
+    .map(([id, p]) => ({
+      id,
+      name: p?.observedProperty?.label?.en ?? id,
+      unit: unitOf(p ?? {}),
+    }));
   const bb = d.extent?.spatial?.bbox?.[0];
   const bbox: BBox | null = Array.isArray(bb) && bb.length >= 4 ? [bb[0], bb[1], bb[2], bb[3]] : null;
   return { title: typeof d.title === 'string' ? d.title : undefined, modes, unknownQueries, params, bbox, temporal: parseTemporal(d) };

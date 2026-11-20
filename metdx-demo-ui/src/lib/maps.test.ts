@@ -91,6 +91,17 @@ describe('datetimes', () => {
     expect(filterDatetimes(dts, undefined)).toEqual(dts);
   });
 
+  it('reads compact instance ids (MSC) as instants', () => {
+    expect(filterDatetimes(['2026-11-18T23:00:00Z', '2026-11-19T00:00:00Z'], '20261118T23Z')).toEqual([
+      '2026-11-18T23:00:00Z',
+      '2026-11-19T00:00:00Z',
+    ]);
+    expect(filterDatetimes(['2026-11-18T22:00:00Z', '2026-11-19T00:00:00Z'], '20261118T23Z')).toEqual(['2026-11-19T00:00:00Z']);
+    expect(filterDatetimes(['2026-11-18T22:00:00Z'], 'latest')).toEqual(['2026-11-18T22:00:00Z']);
+    const now = new Date('2026-11-18T08:00:00Z');
+    expect(defaultInstance(['20261117T12Z', '20261118T00Z', '20261119T00Z'], now)).toBe('20261118T00Z');
+  });
+
   it('defaults to today\'s datetime, else last, else midnight', () => {
     const now = new Date('2026-10-19T08:00:00Z');
     expect(defaultDatetime(['2026-10-19T06:00:00Z', '2026-10-19T12:00:00Z'], now)).toBe('2026-10-19T06:00:00Z');

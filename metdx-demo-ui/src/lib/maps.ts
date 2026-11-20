@@ -4,7 +4,7 @@
  * `build_url`): `{map}?f=png&bbox=..&width=..&height=..&datetime=..&parameter-name=..&subset=z(..)`.
  * Values are emitted verbatim (not percent-encoded), exactly like Flet.
  */
-import { splitIso } from './edr';
+import { instanceToIso, splitIso } from './edr';
 import type { BBox, Geometry } from './types';
 
 export const OGC_MAP_REL = 'http://www.opengis.net/def/rel/ogc/1.0/map';
@@ -45,18 +45,28 @@ export function todayAtMidnight(now: Date = new Date()): string {
   return `${utcDate(now)}T00:00:00Z`;
 }
 
+/** An instance id as ISO 8601 (`20261118T23Z` -> `2026-11-18T23:00:00Z`); `cleanDt` when it is not a datetime. */
+function instanceIso(instance: string): string {
+  return instanceToIso(instance) ?? cleanDt(instance);
+}
+
 /** Instance to preselect: today's if present, otherwise the latest (last). */
 export function defaultInstance(instances: string[], now: Date = new Date()): string | undefined {
   if (!instances.length) return undefined;
   const today = utcDate(now);
-  return instances.find((i) => i.slice(0, 10) === today) ?? instances[instances.length - 1];
+  return instances.find((i) => instanceIso(i).slice(0, 10) === today) ?? instances[instances.length - 1];
 }
 
-/** Datetimes at or after the instance (string comparison on normalised values). */
+/** Datetimes at or after the instance (instants compared); all of them when the instance is not a datetime. */
 export function filterDatetimes(datetimes: string[], instance: string | undefined): string[] {
   if (!instance || !datetimes.length) return datetimes;
-  const inst = cleanDt(instance);
-  return datetimes.filter((dt) => dt >= inst);
+  const inst = instanceIso(instance);
+  const instMs = Date.parse(inst);
+  if (Number.isNaN(instMs)) return datetimes;
+  return datetimes.filter((dt) => {
+    const ms = Date.parse(dt);
+    return Number.isNaN(ms) ? dt >= inst : ms >= instMs;
+  });
 }
 
 /**
