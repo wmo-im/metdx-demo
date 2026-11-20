@@ -383,15 +383,13 @@ chunk      init_time       lead_h  url                                          
 
     ![Met Office Global Deterministic pipeline: from CF-netCDF on Amazon S3 to OGC API – EDR](images/metoffice-global-edr-pipeline.png)
 
-17. **EDR:**
-    - Zoom into the British Isles
-    - Open the EDR query builder: the query types are "POSITION", "AREA", "RADIUS" and "CUBE" (plus `instances`, its model runs). Again, that's this endpoint's `data_queries` metadata.
-    - Select "AREA", click "Draw area", then draw a small box on the map - e.g., over southern England _(keep it small: every grid point in the box comes back)_
-    - Select "air_temperature (Air temperature at pressure level) \[K\]" from the parameter list
-    - **==TODO==** _select a pressure level, e.g., 850 hPa (this endpoint gives pressure in Pa, so `z=85000`): check how the Web UI offers the vertical levels_
-    - In the "Datetime" section, select a single time - e.g., **==TODO==** _a time in the newest model run (on 2026-11-12 the newest instance was 2026-10-29T00Z, covering 2026-10-29 to 2026-11-05)_
-    - Click "Fetch": the Web UI shows the temperature field over the box
-    - **==TODO==** _check the response time in the Web UI: on 2026-11-12 an area query over England and Wales took 30 s and returned 6.8 MB, and later queries timed out_
+17. **EDR:** Select the “EDR” viewer; this open the query interface for the Met Office Global Deterministic data that is on standard levels _(pressure levels is another collection, not shown in the demo)_
+    - This EDR service supports query types "POSITION", "AREA", "RADIUS" and "CUBE" (plus `instances`, its model runs); again, that's this endpoint's `data_queries` metadata
+    - Zoom into the European area
+    - Select “AREA”, “RECTANGLE”, then “Draw area” and draw a bounding box on the map for your selected area
+    - Choose “temperature_at_screen_level (1.5m (screen level) temperature) \[K\]” from “Parameters” 
+    - In “Datetime” choose “RANGE”; the default selects a 6-hour period
+    - Click “Fetch” to retrieve the data; use the time-slider to animate through the 7 time-steps returned
 18. Using Web APIs isn't just a future thing - in Europe, [EUMETNET](https://www.eumetnet.eu) has built on the foundations of WIS2 with [MeteoGate](https://meteogate.eu) to provide federated access to Web services from its Members.
     - MeteoGate includes a Web application called [Data Explorer](https://explorer.meteogate.eu/workspace/defaultDataExplorerWorkspacePreset) _(based on [GeoWeb](https://opengeoweb.gitlab.io) - developed by KNMI, MetNo, and FMI)_ - open [Data Explorer](https://explorer.meteogate.eu/workspace/defaultDataExplorerWorkspacePreset) in a browser
     - Data Explorer loads presets for common tooling - starting with a widget to search the WIS2 Catalogue
