@@ -391,14 +391,13 @@ chunk      init_time       lead_h  url                                          
     - In "Datetime" choose "RANGE"; the default selects a 6-hour period
     - Click "Fetch" to retrieve the data; use the time-slider to animate through the 7 time-steps returned
 18. Using Web APIs isn't just a future thing - in Europe, [EUMETNET](https://www.eumetnet.eu) has built on the foundations of WIS2 with [MeteoGate](https://meteogate.eu) to provide federated access to Web services from its Members.
-    - MeteoGate includes a Web application called [Data Explorer](https://explorer.meteogate.eu/workspace/defaultDataExplorerWorkspacePreset) _(based on [GeoWeb](https://opengeoweb.gitlab.io) - developed by KNMI, MetNo, and FMI)_ - open [Data Explorer](https://explorer.meteogate.eu/workspace/defaultDataExplorerWorkspacePreset) in a browser
+    - MeteoGate includes a Web application called [Data Explorer](https://explorer.meteogate.eu/workspace/defaultDataExplorerWorkspacePreset) _(based on [GeoWeb](https://opengeoweb.gitlab.io) - developed by KNMI, MetNo, and FMI)_ - open [Data Explorer](https://data-explorer-test.out.ock.fmi.fi/workspace/defaultDataExplorerWorkspacePreset) in a browser
     - Data Explorer loads presets for common tooling - starting with a widget to search the WIS2 Catalogue
-    - Unselect the "MeteoGate only" button to see all the WIS2 catalogue records
     - Filter by country, e.g. "Austria" (a handful of records), click on the information icon "i" to inspect a WIS2 discovery metadata record
-    - Most datasets in WIS2 aren't yet exposed through APIs - so let's jump to some that are: click "Data Explorer" on the top menu bar to load a new preset, select "Meteogate - Surface Observations" which will load map and data panels side-by-side
+    - Most datasets in WIS2 aren't yet exposed through APIs - so let's jump to some that are: click "Data Explorer" on the top menu bar to load a new preset, select "Meteogate Surface Observations Virtual" which will load map and data panels side-by-side
     - Behind the scenes Data Explorer is talking to an OGC API EDR endpoint for the E-SOH system (EUMETNET Supplementary Observations Datahub, see documentation [here](https://github.com/EUMETNET/e-soh-documentation/wiki/1.-Get-started)) that publishes a rolling 24-hour cache of observations for observing stations operated by EUMETNET Members
     - The map panel is showing "frog-spawn": one dot for each observing station from which data is available
-    - On the map, pick a station (e.g., Helsinki Kumpula) and the data panel loads the last 24 hours of data for each parameter the station reports
+    - On the map, pick a station (e.g., Helsinki Kumpula) and the data panel loads the last 24 hours of data for parameter "Air temperature"
 19. The point: the UI knows nothing about ECMWF or ECCC. Everything it does comes from each record's links and the collection metadata behind them (**metadata-driven**). That's why the same UI offered six query types for the ECMWF forecast, three for ERA5 and only `position` for Canada. And MeteoGate's Data Explorer shows the same pattern at European scale: catalogue first, then standard APIs.
 
 The UI is a static web page (GitHub Pages): the browser calls the catalogue and the APIs directly. Direct links for the ECMWF 0.1° record:
