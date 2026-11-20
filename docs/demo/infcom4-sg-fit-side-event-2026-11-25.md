@@ -342,7 +342,10 @@ chunk      init_time       lead_h  url                                          
    - Again, you see the EDR query URL that's been built
    - Click "Fetch" _(this can take a while depending on the time duration and bounding box size)_ - the Web UI zooms into the requested area and plots the data on the map ("CONTOURS" or "POINTS" for different plotting styles)
    - Use the time-slider to step through the hourly data steps
-10. **Maps:** _(time allowing)_ open the Maps view: a rendered forecast map, no data handling at all.
+10. **Maps:** _(time allowing)_ Return back to the Record and click "OGC Maps"  open the Maps view: a rendered forecast map, no data handling at all.
+    - A Map service returns images - there's no data for the client to handle
+    - Keep the default "Instance", "Date", "Time, and "Parameter" ("2t", 2-m temperature); click "Draw BBOX" to select an area on the map, then press "Fetch"
+    - The Map service renders the forecast map and returns it; the client application displays the image
 11. Now head back to the main catalogue search page and select the "Canadian weather forecast \[experimental\]" dataset
     - A short explainer for the data pipeline:
 
