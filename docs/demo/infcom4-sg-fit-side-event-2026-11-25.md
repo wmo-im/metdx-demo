@@ -15,15 +15,17 @@
   
 ## Introduction  
 
-- We've prepared a demonstration to help illustrate how these "least disruptive" approaches - Web services and ARCO data - build on top of WIS2
-- In the interests of time, we'll move through the demo quite quickly
-- There's more to see at the WIS2 booth just outside - more examples, and more time to talk through how these demos work
-- Please do stop by and talk to \[Jeremy, Tom, Secretariat colleagues\]
+- The Study Group on Future Data Infrastructure have prepared a demonstration to help illustrate how the "least disruptive" approaches - Web services and ARCO data - build on top of WIS2
+- The multi-step demonstration is in three parts: steps 1-4 lay the foundations of how WIS2 currently works, then steps 5-8 show how we can evolve data sharing capabilities; step 9 looks beyond the study group's recommendations to how AI Agents could interact with data from WIS2 
+- _(live demo)_
+  - In the interests of time, we'll move through the demo quite quickly
+  - There's more to see at the WIS2 booth just outside - more examples, and more time to talk through how these demos work
+  - Please do stop by and talk to \[Jeremy, Tom, Secretariat colleagues\]
 
 ## Step 1: Find the dataset  
 ![slide-1-step-1.png](images/slide-1-step-1.png)  
 1. Setup:   
-   - [labs.wis2dev.io](https://labs.wis2dev.io) Global Discovery Catalogue [https://wmo-resource-catalogue.labs.wis2dev.io/collections/wis2-discovery-metadata/](https://wmo-resource-catalogue.labs.wis2dev.io/collections/wis2-discovery-metadata/)  
+   - [labs.wis2dev.io](https://labs.wis2dev.io) Global Discovery Catalogue [https://wmo-resource-catalogue.labs.wis2dev.io/collections/wis2-discovery-metadata](https://wmo-resource-catalogue.labs.wis2dev.io/collections/wis2-discovery-metadata)  
    - Use “metdx-demo” keyword to make our demo metadata records easy to find  
 2. Clarify terminology for “dataset”: in WIS2 context it’s a whole basket of resources - not an individual data file  
 3. Search [labs.wis2dev.io](https://labs.wis2dev.io) for a dataset - keyword “metdx-demo”: ++urn:wmo:md:int-ecmwf:ecmwf-opendata-ifs-0p1-oper++ [note: watch for auto-correct shenanigans if you type “metdx-demo”]  
