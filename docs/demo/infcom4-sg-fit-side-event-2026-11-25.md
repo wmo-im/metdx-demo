@@ -31,6 +31,8 @@
 3. Search [labs.wis2dev.io](https://labs.wis2dev.io) for a dataset - keyword “metdx-demo”: ++urn:wmo:md:int-ecmwf:ecmwf-opendata-ifs-0p1-oper++ [note: watch for auto-correct shenanigans if you type “metdx-demo”]  
 4. _(optional)_ Load the WCMP2 record into the WCMP2 editor at https://6a6d74.github.io/wcmp2-editor/ to show the record in a more human readable form - upload the record from URL https://wmo-resource-catalogue.labs.wis2dev.io/collections/wis2-discovery-metadata/items/urn:wmo:md:int-ecmwf:ecmwf-opendata-ifs-0p1-oper?f=json  
 5. Talk about the “metadata driven workflow” (refer back to “Four mechanisms, one workflow” in the slides)   
+    - The goal here is to demonstrate a metadata driven workflow - starting from the WIS2 Global Discovery Catalogue, user applications should able to automatically know how interact with data resources published to WIS2; providing enough metadata to build a query or to populate options that a user can select in an application
+    - Nobody should need a cheat-sheet or have to look up documentation elsewhere to use the data  
 6. Show the links in the HTML page  
 7. Show the links in JSON; very brief overview of a links object, highlight `"rel": "collection"` as being the machine-readable instruction that says “this is a link to an interactive data resource” (e.g., an OGC or STAC API)  
 8. We’ll come back to these links in the rest of the demo …  
