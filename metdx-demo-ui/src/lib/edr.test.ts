@@ -821,3 +821,10 @@ describe('time range of area-type queries', () => {
     expect(spacingFromResponse(25, 4)).toBeNull(); // too few points to tell
   });
 });
+
+describe('parseCollection parameter order', () => {
+  it('sorts parameters alphabetically by id', () => {
+    const info = parseCollection({ parameter_names: { tp: {}, '2t': {}, msl: {}, '10u': {}, Cape: {} } });
+    expect(info.params.map((p) => p.id)).toEqual(['2t', '10u', 'Cape', 'msl', 'tp']);
+  });
+});

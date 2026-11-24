@@ -59,11 +59,22 @@ export function withJsonFormat(href: string): string {
  * Collection document URLs of a record: links with rel=collection that look
  * like JSON (type contains "json", href ends with ?f=json, or has /collections/).
  */
-export function collectionUrls(record: Pick<OgcRecord, 'links'>): string[] {
+/**
+ * Temporary workaround: collection links hidden for specific records because the
+ * service is unreliable. Remove an entry once the record is fixed in the catalogue.
+ */
+export const HIDDEN_COLLECTIONS: Record<string, string[]> = {
+  // ECMWF operational record: the OGC Maps service (operational_map_server) is unreliable.
+  'urn:wmo:md:int-ecmwf:ecmwf-opendata-ifs-0p1-oper': ['/collections/operational_map_server'],
+};
+
+export function collectionUrls(record: Pick<OgcRecord, 'links'> & { id?: string }): string[] {
   const urls: string[] = [];
+  const hidden = (record.id && HIDDEN_COLLECTIONS[record.id]) || [];
   for (const link of record.links ?? []) {
     if (link.rel !== 'collection') continue;
     const href = link.href ?? '';
+    if (hidden.some((h) => href.includes(h))) continue;
     const type = link.type ?? '';
     if (!(type.includes('json') || href.endsWith('?f=json') || href.includes('/collections/'))) continue;
     urls.push(withJsonFormat(href));

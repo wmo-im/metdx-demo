@@ -975,7 +975,9 @@ export function parseCollection(data: unknown): EdrCollectionInfo {
       id,
       name: p?.observedProperty?.label?.en ?? id,
       unit: unitOf(p ?? {}),
-    }));
+    }))
+    // Alphabetical by id (as the Maps parameter list appears), case-insensitive.
+    .sort((a, b) => a.id.localeCompare(b.id, undefined, { sensitivity: 'base', numeric: true }));
   const bbox = collectionBBox(d);
   return { title: typeof d.title === 'string' ? d.title : undefined, modes, unknownQueries, params, bbox, temporal: parseTemporal(d) };
 }

@@ -11,7 +11,7 @@ import PhoneIcon from '@mui/icons-material/Phone';
 import DatasetIcon from '@mui/icons-material/Dataset';
 import MapIcon from '@mui/icons-material/Map';
 import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
-import { recordMeta, useServices } from '../../lib/records';
+import { HIDDEN_COLLECTIONS, recordMeta, useServices } from '../../lib/records';
 import { paths, useMap, useRecord, type NavState } from '../../shell';
 
 function MetaRow({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
@@ -71,7 +71,11 @@ export default function RecordPage() {
 
   const m = recordMeta(record);
   // Everything but `self` (the record's own URL).
-  const links = (record.links ?? []).filter((l) => !!l.href && l.rel !== 'self');
+  // Also drops links hidden by the HIDDEN_COLLECTIONS workaround.
+  const hidden = HIDDEN_COLLECTIONS[record.id ?? ''] ?? [];
+  const links = (record.links ?? []).filter(
+    (l) => !!l.href && l.rel !== 'self' && !hidden.some((h) => l.href!.includes(h)),
+  );
   const recId = record.id;
   const checking = !services;
   const edrCol = services?.edrCollection;

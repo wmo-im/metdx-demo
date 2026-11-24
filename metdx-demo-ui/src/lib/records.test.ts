@@ -179,3 +179,16 @@ describe('recordMeta', () => {
     expect(formatCreated('2024-03-01T00:00:00Z')).toBe('March 01, 2024');
   });
 });
+
+describe('HIDDEN_COLLECTIONS workaround', () => {
+  const links = [
+    { rel: 'collection', type: 'application/json', href: 'https://x.eu/collections/operational-data?f=json' },
+    { rel: 'collection', type: 'application/json', href: 'https://x.eu/collections/operational_map_server?f=json' },
+  ];
+  it('drops the maps collection for the ECMWF operational record only', () => {
+    expect(collectionUrls({ id: 'urn:wmo:md:int-ecmwf:ecmwf-opendata-ifs-0p1-oper', links })).toEqual([
+      'https://x.eu/collections/operational-data?f=json',
+    ]);
+    expect(collectionUrls({ id: 'urn:other', links })).toHaveLength(2);
+  });
+});
