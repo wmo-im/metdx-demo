@@ -32,7 +32,7 @@ describe('RecordPage map', () => {
         </MapProvider>
       </MemoryRouter>,
     );
-    await screen.findByRole('link', { name: 'EDR' });
+    await screen.findByRole('link', { name: 'OGC API - EDR' });
     await waitFor(() => expect(showExtent).toHaveBeenCalledWith(expect.any(Array), { fit: true, padLevels: 1 }));
     const bbox = showExtent.mock.calls.find((c) => c[0])![0]!;
     expect(bbox).toHaveLength(4);

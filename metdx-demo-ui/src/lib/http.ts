@@ -11,7 +11,7 @@ import { useProxy } from './config';
 
 export const PROXY_PATH = '/api/proxy';
 
-/** Defaults used for the slow OGC Maps server (as the Flet app did). */
+/** Defaults used for the slow OGC API - Maps server (as the Flet app did). */
 export const MAPS_HTTP = { timeoutMs: 120_000, retries: 3, retryDelayMs: 2_000, retryMaxElapsedMs: 30_000 } as const;
 
 export const DEFAULT_TIMEOUT_MS = 30_000;

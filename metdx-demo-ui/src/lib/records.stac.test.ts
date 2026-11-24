@@ -44,7 +44,7 @@ describe('a STAC rel=collection link in a WCMP2 record', () => {
     expect(info).toEqual(ref);
     expect(info.edrCollection).toBe(EDR);
     expect(info.mapsCollection).toBe(MAPS);
-    // the STAC document was fetched (and ignored): it advertises neither data_queries nor an OGC Maps link
+    // the STAC document was fetched (and ignored): it advertises neither data_queries nor an OGC API - Maps link
     expect(mock.stacCalls).toEqual([`${STAC_HREF}?f=json`]);
   });
 

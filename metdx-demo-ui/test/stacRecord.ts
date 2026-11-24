@@ -1,6 +1,6 @@
 /**
  * Test helpers for a WCMP2 record that also links a STAC Collection (rel=collection, application/json) next to
- * the EDR / OGC Maps collections: the record fixture with those links added, a stand-in STAC Collection document and a
+ * the OGC API - EDR / OGC API - Maps collections: the record fixture with those links added, a stand-in STAC Collection document and a
  * fetch wrapper that serves them on top of the mock fetch.
  */
 import { createMockFetch, type MockFetch } from '../src/lib/mockFetch';
@@ -37,7 +37,7 @@ export function recordWithStac(where: 'first' | 'last'): OgcRecord {
   };
 }
 
-/** A STAC 1.1.0 Collection as the ECMWF catalogue serves it: no `data_queries`, no OGC Maps link. */
+/** A STAC 1.1.0 Collection as the ECMWF catalogue serves it: no `data_queries`, no OGC API - Maps link. */
 export const STAC_COLLECTION = {
   type: 'Collection',
   stac_version: '1.1.0',

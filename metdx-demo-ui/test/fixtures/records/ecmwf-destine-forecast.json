@@ -42,7 +42,7 @@
     "type": "dataset",
     "identifier": "urn:wmo:md:int-ecmwf:weather.prediction.forecast.global",
     "title": "ECMWF IFS Global Deterministic Forecast (Destination Earth)",
-    "description": "Global deterministic weather forecast from the ECMWF Integrated Forecasting System (IFS), served via the Destination Earth Digital Twin. Provides atmospheric fields including temperature, wind, humidity, pressure, precipitation and cloud cover at multiple levels. Data is accessible via the OGC Environmental Data Retrieval (EDR) API for point, area, trajectory and radius queries, and as rendered map images via the OGC Maps API.",
+    "description": "Global deterministic weather forecast from the ECMWF Integrated Forecasting System (IFS), served via the Destination Earth Digital Twin. Provides atmospheric fields including temperature, wind, humidity, pressure, precipitation and cloud cover at multiple levels. Data is accessible via the OGC Environmental Data Retrieval (EDR) API for point, area, trajectory and radius queries, and as rendered map images via the OGC API - Maps API.",
     "language": "en",
     "keywords": [
       "weather",
@@ -59,7 +59,7 @@
       "ECMWF",
       "IFS",
       "EDR",
-      "OGC Maps",
+      "OGC API - Maps",
       "metdx-demo"
     ],
     "themes": [
@@ -169,19 +169,19 @@
       "rel": "collection",
       "type": "application/json",
       "href": "https://polytope-edr.lumi.apps.dte.destination-earth.eu/collections/operational-data?f=json",
-      "title": "OGC EDR — Operational forecast data (position, area, trajectory, radius queries)"
+      "title": "OGC API - EDR — Operational forecast data (position, area, trajectory, radius queries)"
     },
     {
       "rel": "collection",
       "type": "application/json",
       "href": "https://polytope-edr.lumi.apps.dte.destination-earth.eu/collections/operational_map_server?f=json",
-      "title": "OGC Maps — Rendered forecast map images"
+      "title": "OGC API - Maps — Rendered forecast map images"
     },
     {
       "rel": "related",
       "type": "text/html",
       "href": "https://polytope-edr.lumi.apps.dte.destination-earth.eu",
-      "title": "Polytope EDR API landing page"
+      "title": "Polytope OGC API landing page"
     },
     {
       "rel": "related",

@@ -19,8 +19,8 @@ const VIEWPORT_CLASS: Record<EngineName, string> = { ol: '.ol-viewport', leaflet
 
 test.beforeAll(() => mkdirSync(SCREENS, { recursive: true }));
 
-/** Search -> record -> the `kind` page (EDR / OGC Maps); EDR: query type `mode` with the first parameter selected. */
-async function openRecordPage(page: Page, engine: EngineName, kind: 'EDR' | 'OGC Maps', mode = 'position') {
+/** Search -> record -> the `kind` page (OGC API - EDR / OGC API - Maps); EDR: query type `mode` with the first parameter selected. */
+async function openRecordPage(page: Page, engine: EngineName, kind: 'OGC API - EDR' | 'OGC API - Maps', mode = 'position') {
   await page.goto(`/?mock=1&map=${engine}`);
   await page.getByLabel('Search datasets').fill('Deterministic');
   await page.getByRole('button', { name: 'Search', exact: true }).click();
@@ -28,7 +28,7 @@ async function openRecordPage(page: Page, engine: EngineName, kind: 'EDR' | 'OGC
   await expect(page.getByRole('heading', { name: RECORD_TITLE })).toBeVisible();
   await page.getByRole('link', { name: kind, exact: true }).click();
   await expect(page.getByTestId('map')).toHaveAttribute('data-engine', engine);
-  if (kind === 'EDR') {
+  if (kind === 'OGC API - EDR') {
     await expect(page.getByRole('button', { name: 'position', exact: true })).toBeVisible();
     if (mode !== 'position') await page.getByRole('button', { name: mode, exact: true }).click();
     await page.getByRole('button', { name: /2t/ }).first().click();
@@ -130,7 +130,7 @@ test.describe('engine selection', () => {
 
   test('switching the engine in the middle of a draw cancels it; drawing works again on the new engine', async ({ page, engine }) => {
     const other = OTHER[engine];
-    await openRecordPage(page, engine, 'OGC Maps');
+    await openRecordPage(page, engine, 'OGC API - Maps');
     await page.getByRole('button', { name: 'Draw BBOX' }).click();
     await expect(page.getByRole('button', { name: 'Drawing...' })).toBeVisible();
 
@@ -147,7 +147,7 @@ test.describe('engine selection', () => {
   test('switching the engine clears the drawn data; a new fetch draws on the new engine', async ({ page, engine }) => {
     const other = OTHER[engine];
     await page.route('**/tile.openstreetmap.org/**', (route) => route.abort());
-    await openRecordPage(page, engine, 'EDR', 'area');
+    await openRecordPage(page, engine, 'OGC API - EDR', 'area');
     await dragBbox(page, 'Draw area');
     await expect(page.getByTestId('edr-geometry')).toContainText(/\d/);
     await page.getByRole('button', { name: 'Fetch' }).click();
@@ -169,7 +169,7 @@ test.describe('engine selection', () => {
 type Scenario = { name: string; run: (page: Page, engine: EngineName) => Promise<void> };
 
 const areaContours: Scenario['run'] = async (page, engine) => {
-  await openRecordPage(page, engine, 'EDR', 'area');
+  await openRecordPage(page, engine, 'OGC API - EDR', 'area');
   await dragBbox(page, 'Draw area');
   await page.getByRole('button', { name: 'Fetch' }).click();
   await expect(page.getByTestId('edr-result').getByTestId('legend')).toBeVisible();
@@ -190,7 +190,7 @@ const SCENARIOS: Scenario[] = [
   {
     name: 'trajectory',
     run: async (page, engine) => {
-      await openRecordPage(page, engine, 'EDR', 'trajectory');
+      await openRecordPage(page, engine, 'OGC API - EDR', 'trajectory');
       await page.getByRole('button', { name: 'Draw trajectory' }).click();
       const box = (await page.getByTestId('map').boundingBox())!;
       const cx = box.x + box.width / 2;
@@ -207,7 +207,7 @@ const SCENARIOS: Scenario[] = [
   {
     name: 'maps-overlay',
     run: async (page, engine) => {
-      await openRecordPage(page, engine, 'OGC Maps');
+      await openRecordPage(page, engine, 'OGC API - Maps');
       await dragBbox(page, 'Draw BBOX');
       await expect(page.getByTestId('maps-status')).toContainText('Bounding box set');
       await page.getByRole('button', { name: 'Fetch' }).click();

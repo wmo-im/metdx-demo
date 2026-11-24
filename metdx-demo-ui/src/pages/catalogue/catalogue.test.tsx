@@ -60,7 +60,7 @@ describe('catalogue -> record (recordsSource catalogue, mock fixtures)', () => {
     const opendata = cards.find((c) => c.textContent?.includes('Open Data'))!;
     const msc = cards.find((c) => c.textContent?.includes('Weather Elements on the Grid'))!;
     await within(destine).findByTestId('badge-edr');
-    expect(within(destine).getByTestId('badge-maps')).toHaveTextContent('OGC Maps');
+    expect(within(destine).getByTestId('badge-maps')).toHaveTextContent('OGC API - Maps');
     expect(within(destine).getByTestId('query-types')).toHaveTextContent(/position/);
     // keyword chips capped at 5
     expect(within(destine).getByText('weather')).toBeInTheDocument();
@@ -94,8 +94,8 @@ describe('catalogue -> record (recordsSource catalogue, mock fixtures)', () => {
     expect(meta).toHaveTextContent('January 01, 2026');
     expect(meta).toHaveTextContent('core');
 
-    const edr = await screen.findByRole('link', { name: 'EDR' });
-    const maps = screen.getByRole('link', { name: 'OGC Maps' });
+    const edr = await screen.findByRole('link', { name: 'OGC API - EDR' });
+    const maps = screen.getByRole('link', { name: 'OGC API - Maps' });
     const edrHref = edr.getAttribute('href')!;
     expect(edrHref).toMatch(/\/edr\?col=/);
     expect(decodeURIComponent(edrHref.split('col=')[1])).toContain('/collections/operational-data?f=json');
@@ -113,9 +113,9 @@ describe('catalogue -> record (recordsSource catalogue, mock fixtures)', () => {
     renderApp();
     const cards = await screen.findAllByTestId('result-card');
     await userEvent.click(cards.find((c) => c.textContent?.includes('Open Data'))!.querySelector('a')!);
-    const edr = await screen.findByRole('button', { name: 'EDR' });
+    const edr = await screen.findByRole('button', { name: 'OGC API - EDR' });
     expect(edr).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'OGC Maps' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'OGC API - Maps' })).toBeDisabled();
     expect(screen.getByTestId('record-description')).toBeInTheDocument();
 
     await userEvent.click(screen.getByLabelText('Back to results'));
@@ -152,7 +152,7 @@ describe('Back from a record', () => {
     await userEvent.type(screen.getByLabelText('Search datasets'), 'destination{Enter}');
     await waitFor(() => expect(screen.getByTestId('results-header')).toHaveTextContent("Found 1 results for 'destination'"));
     await userEvent.click(screen.getByTestId('result-card').querySelector('a')!);
-    await userEvent.click(await screen.findByRole('link', { name: 'EDR' }));
+    await userEvent.click(await screen.findByRole('link', { name: 'OGC API - EDR' }));
     expect(await screen.findByTestId('page-edr')).toBeInTheDocument();
 
     // EDR -> Record (one step back, not a new entry) -> Back lands on the search, not on the EDR page again
@@ -168,7 +168,7 @@ describe('Back from a record', () => {
   it('a record opened directly goes to the catalogue, also via the EDR page', async () => {
     setFetchImpl(createMockFetch());
     renderApp(`/record/${destineId}`);
-    await userEvent.click(await screen.findByRole('link', { name: 'EDR' }));
+    await userEvent.click(await screen.findByRole('link', { name: 'OGC API - EDR' }));
     expect(await screen.findByTestId('page-edr')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('link', { name: 'Record' }));
     await userEvent.click(await screen.findByLabelText('Back to results'));
