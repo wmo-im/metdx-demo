@@ -154,19 +154,19 @@ export default function RecordPage() {
               variant="contained"
               color="primary"
               startIcon={<DatasetIcon />}
-              aria-label="EDR"
+              aria-label="OGC API - EDR"
               component={RouterLink}
               to={paths.edr(recId, edrCol)}
               state={{ ...nav, viaRecord: true } satisfies NavState}
             >
-              EDR
+              OGC API - EDR
             </Button>
           </Tooltip>
         ) : (
           <Tooltip title={checking ? 'Checking for EDR support...' : 'EDR not available for this collection'}>
             <span>
-              <Button variant="contained" disabled aria-label="EDR" startIcon={<DatasetIcon />}>
-                EDR
+              <Button variant="contained" disabled aria-label="OGC API - EDR" startIcon={<DatasetIcon />}>
+                OGC API - EDR
               </Button>
             </span>
           </Tooltip>
@@ -177,19 +177,19 @@ export default function RecordPage() {
               variant="contained"
               color="success"
               startIcon={<MapIcon />}
-              aria-label="OGC Maps"
+              aria-label="OGC API - Maps"
               component={RouterLink}
               to={paths.maps(recId, mapsCol)}
               state={{ ...nav, viaRecord: true } satisfies NavState}
             >
-              OGC Maps
+              OGC API - Maps
             </Button>
           </Tooltip>
         ) : (
           <Tooltip title={checking ? 'Checking for OGC Maps support...' : 'OGC Maps not available for this collection'}>
             <span>
-              <Button variant="contained" disabled aria-label="OGC Maps" startIcon={<MapIcon />}>
-                OGC Maps
+              <Button variant="contained" disabled aria-label="OGC API - Maps" startIcon={<MapIcon />}>
+                OGC API - Maps
               </Button>
             </span>
           </Tooltip>
