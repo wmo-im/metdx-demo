@@ -64,7 +64,7 @@ export function withJsonFormat(href: string): string {
  * service is unreliable. Remove an entry once the record is fixed in the catalogue.
  */
 export const HIDDEN_COLLECTIONS: Record<string, string[]> = {
-  // ECMWF operational record: the OGC Maps service (operational_map_server) is unreliable.
+  // ECMWF operational record: the OGC API - Maps service (operational_map_server) is unreliable.
   'urn:wmo:md:int-ecmwf:ecmwf-opendata-ifs-0p1-oper': ['/collections/operational_map_server'],
 };
 
@@ -101,7 +101,7 @@ export function edrQueryTypes(doc: CollectionDoc): string[] {
   return hasEdr(doc) ? Object.keys(doc.data_queries as object) : [];
 }
 
-/** Href of the first link with the OGC Maps relation (catalogue.py:156), if any. */
+/** Href of the first link with the OGC API - Maps relation (catalogue.py:156), if any. */
 export function mapsLink(doc: CollectionDoc): string | undefined {
   return (doc.links ?? []).find((l) => l.rel === OGC_MAP_REL)?.href ?? undefined;
 }
@@ -126,7 +126,7 @@ export interface ServiceInfo {
   queryTypes: string[];
   /** First collection URL with `data_queries`. */
   edrCollection?: string;
-  /** First collection URL with an OGC Maps link, and the resolved map link. */
+  /** First collection URL with an OGC API - Maps link, and the resolved map link. */
   mapsCollection?: string;
   mapsLink?: string;
   /** Extent (first bbox) of the EDR collection, else the Maps one. */

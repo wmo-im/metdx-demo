@@ -23,14 +23,14 @@ import { PAGE_SIZE, pageInfo, searchRecords, useServices, type SearchPage } from
 import type { OgcRecord } from '../../lib/types';
 import { cacheRecords, paths, useMap, type NavState } from '../../shell';
 
-/** EDR (blue) and OGC Maps (green) badges, shown once the collections have been probed. */
+/** EDR (blue) and OGC API - Maps (green) badges, shown once the collections have been probed. */
 export function ServiceBadges({ record }: { record: OgcRecord }) {
   const info = useServices(record);
   if (!info) return null;
   return (
     <>
-      {info.edr && <Chip size="small" color="primary" label="EDR" data-testid="badge-edr" />}
-      {info.maps && <Chip size="small" color="success" label="OGC Maps" data-testid="badge-maps" />}
+      {info.edr && <Chip size="small" color="primary" label="OGC API - EDR" data-testid="badge-edr" />}
+      {info.maps && <Chip size="small" color="success" label="OGC API - Maps" data-testid="badge-maps" />}
       {info.queryTypes.length > 0 && (
         <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', flexWrap: 'wrap', width: '100%' }} data-testid="query-types">
           <Typography variant="caption" color="text.secondary">

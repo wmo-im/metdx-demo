@@ -67,7 +67,7 @@ function mapErrorMessage(e: unknown): string {
 
 const EMPTY_SCHEMA: MapSchema = { instances: [], datetimes: [], parameters: [] };
 
-/** OGC Maps: choose bbox/time/parameter/level, fetch the PNG and overlay it on the map. */
+/** OGC API - Maps: choose bbox/time/parameter/level, fetch the PNG and overlay it on the map. */
 export default function MapsPage() {
   const { id } = useParams();
   const [search] = useSearchParams();
@@ -331,7 +331,7 @@ export default function MapsPage() {
   if (!col) {
     return (
       <Box sx={{ p: 2 }} data-testid="page-maps">
-        <Alert severity="warning">No collection selected. Open this page from a record that offers OGC Maps.</Alert>
+        <Alert severity="warning">No collection selected. Open this page from a record that offers OGC API - Maps.</Alert>
       </Box>
     );
   }
@@ -340,7 +340,7 @@ export default function MapsPage() {
     <Box sx={{ p: 2 }} data-testid="page-maps">
       {id && <RecordLink recordId={id} />}
       <Typography variant="h6" component="h2">
-        OGC Maps{title ? ` — ${title}` : ''}
+        OGC API - Maps{title ? ` — ${title}` : ''}
       </Typography>
       <Typography variant="caption" color="text.secondary" sx={{ wordBreak: 'break-all' }}>
         {id ? `Record ${id}` : ''}

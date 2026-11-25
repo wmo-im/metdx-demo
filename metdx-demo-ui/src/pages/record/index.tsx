@@ -28,7 +28,7 @@ function MetaRow({ icon, label, value }: { icon: ReactNode; label: string; value
   );
 }
 
-/** Record metadata page with Data Access buttons (EDR / OGC Maps). */
+/** Record metadata page with Data Access buttons (OGC API - EDR / OGC API - Maps). */
 export default function RecordPage() {
   const { id } = useParams<{ id: string }>();
   const { record, loading, error } = useRecord(id);
@@ -149,47 +149,47 @@ export default function RecordPage() {
       </Typography>
       <Stack direction="row" spacing={1}>
         {edrCol ? (
-          <Tooltip title="Query this EDR collection on a map">
+          <Tooltip title="Query this OGC API - EDR collection on a map">
             <Button
               variant="contained"
               color="primary"
               startIcon={<DatasetIcon />}
-              aria-label="EDR"
+              aria-label="OGC API - EDR"
               component={RouterLink}
               to={paths.edr(recId, edrCol)}
               state={{ ...nav, viaRecord: true } satisfies NavState}
             >
-              EDR
+              OGC API - EDR
             </Button>
           </Tooltip>
         ) : (
-          <Tooltip title={checking ? 'Checking for EDR support...' : 'EDR not available for this collection'}>
+          <Tooltip title={checking ? 'Checking for OGC API - EDR support...' : 'OGC API - EDR not available for this collection'}>
             <span>
-              <Button variant="contained" disabled aria-label="EDR" startIcon={<DatasetIcon />}>
-                EDR
+              <Button variant="contained" disabled aria-label="OGC API - EDR" startIcon={<DatasetIcon />}>
+                OGC API - EDR
               </Button>
             </span>
           </Tooltip>
         )}
         {mapsCol ? (
-          <Tooltip title="View OGC Maps for this collection">
+          <Tooltip title="View OGC API - Maps for this collection">
             <Button
               variant="contained"
               color="success"
               startIcon={<MapIcon />}
-              aria-label="OGC Maps"
+              aria-label="OGC API - Maps"
               component={RouterLink}
               to={paths.maps(recId, mapsCol)}
               state={{ ...nav, viaRecord: true } satisfies NavState}
             >
-              OGC Maps
+              OGC API - Maps
             </Button>
           </Tooltip>
         ) : (
-          <Tooltip title={checking ? 'Checking for OGC Maps support...' : 'OGC Maps not available for this collection'}>
+          <Tooltip title={checking ? 'Checking for OGC API - Maps support...' : 'OGC API - Maps not available for this collection'}>
             <span>
-              <Button variant="contained" disabled aria-label="OGC Maps" startIcon={<MapIcon />}>
-                OGC Maps
+              <Button variant="contained" disabled aria-label="OGC API - Maps" startIcon={<MapIcon />}>
+                OGC API - Maps
               </Button>
             </span>
           </Tooltip>

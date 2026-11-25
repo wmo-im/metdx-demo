@@ -140,7 +140,7 @@ test('opening a record with a regional footprint zooms to it, with context aroun
 
 test('search -> record -> EDR -> draw point -> Fetch shows JSON and chart', { tag: QUICK }, async ({ page, engine }) => {
   await openRecord(page);
-  await page.getByRole('link', { name: 'EDR', exact: true }).click();
+  await page.getByRole('link', { name: 'OGC API - EDR', exact: true }).click();
   await expect(page.getByTestId('page-edr')).toBeVisible();
   await expect(page.getByRole('button', { name: 'position', exact: true })).toBeVisible();
 
@@ -168,7 +168,7 @@ test('search -> record -> EDR -> draw point -> Fetch shows JSON and chart', { ta
 
 test('record -> Maps -> draw bbox -> Fetch puts an image overlay on the map', { tag: QUICK }, async ({ page }) => {
   await openRecord(page);
-  await page.getByRole('link', { name: 'OGC Maps', exact: true }).click();
+  await page.getByRole('link', { name: 'OGC API - Maps', exact: true }).click();
   await expect(page.getByTestId('page-maps')).toBeVisible();
   await expect(page.getByLabel('Request URL')).toHaveValue(/\/map\?/);
 
@@ -234,7 +234,7 @@ test.describe('going back from a record to the search', () => {
 
   test('after record -> EDR -> Record, the sidebar Back still returns to the search', async ({ page }) => {
     await openRecord(page);
-    await page.getByRole('link', { name: 'EDR', exact: true }).click();
+    await page.getByRole('link', { name: 'OGC API - EDR', exact: true }).click();
     await expect(page.getByTestId('page-edr')).toBeVisible();
     await page.getByRole('link', { name: 'Record', exact: true }).click();
     await expect(page.getByRole('heading', { name: RECORD_TITLE })).toBeVisible();
@@ -254,7 +254,7 @@ test.describe('going back from a record to the search', () => {
 
 test('EDR defaults: position = first step + 1 day, other modes a single step, and a corridor height', async ({ page }) => {
   await openRecord(page);
-  await page.getByRole('link', { name: 'EDR', exact: true }).click();
+  await page.getByRole('link', { name: 'OGC API - EDR', exact: true }).click();
   await expect(page.getByRole('button', { name: 'position', exact: true })).toBeVisible();
   await expect(page.getByLabel('Start date')).toHaveValue('2026-10-19');
   await expect(page.getByLabel('End date')).toHaveValue('2026-10-20');

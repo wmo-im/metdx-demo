@@ -1,4 +1,4 @@
-// EDR results on the map (mock project): the live ECMWF samples served by mockFetch (`?mock=1`) for position, area
+// OGC API - EDR results on the map (mock project): the live ECMWF samples served by mockFetch (`?mock=1`) for position, area
 // and trajectory (on both map engines, see engine.ts); param/time switching, the area time slider (range fetch, 25-step
 // performance), clearing and a 40k-point performance run on routed synthetic CoverageJSON.
 import type { Page } from '@playwright/test';
@@ -29,7 +29,7 @@ async function openEdrMock(page: Page, mode: string) {
   await page.getByRole('button', { name: 'Search', exact: true }).click();
   await page.getByTestId('result-card').filter({ hasText: RECORD_TITLE }).click();
   await expect(page.getByRole('heading', { name: RECORD_TITLE })).toBeVisible();
-  await page.getByRole('link', { name: 'EDR', exact: true }).click();
+  await page.getByRole('link', { name: 'OGC API - EDR', exact: true }).click();
   await expect(page.getByRole('button', { name: 'position', exact: true })).toBeVisible();
   await chooseMode(page, mode);
   await page.getByRole('button', { name: /2t/ }).first().click();

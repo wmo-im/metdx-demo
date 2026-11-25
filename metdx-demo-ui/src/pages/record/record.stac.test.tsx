@@ -28,15 +28,15 @@ describe('record page of a record that also links a STAC Collection', () => {
     ['last', 'ok'],
     ['first', '403'],
     ['last', 'network-error'],
-  ] as const)('STAC link %s, STAC host %s: Links lists both, EDR / OGC Maps stay enabled on the polytope collections', async (where, stac) => {
+  ] as const)('STAC link %s, STAC host %s: Links lists both, OGC API - EDR / OGC API - Maps stay enabled on the polytope collections', async (where, stac) => {
     setFetchImpl(createStacMock(recordWithStac(where), stac));
     render(
       <MemoryRouter initialEntries={[`/record/${encodeURIComponent(REC)}`]} future={future}>
         <App />
       </MemoryRouter>,
     );
-    const edr = await screen.findByRole('link', { name: 'EDR' });
-    const maps = screen.getByRole('link', { name: 'OGC Maps' });
+    const edr = await screen.findByRole('link', { name: 'OGC API - EDR' });
+    const maps = screen.getByRole('link', { name: 'OGC API - Maps' });
     expect(decodeURIComponent(edr.getAttribute('href')!.split('col=')[1])).toBe(
       'https://polytope-edr.lumi.apps.dte.destination-earth.eu/collections/operational-data?f=json',
     );

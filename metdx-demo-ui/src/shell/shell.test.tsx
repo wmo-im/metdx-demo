@@ -53,8 +53,8 @@ describe('app shell', () => {
       await waitFor(() => expect(screen.getAllByTestId('badge-edr').length).toBeGreaterThan(0));
     }],
     [`/record/${encodeURIComponent(REC)}`, 'page-record', async () => {
-      await screen.findByRole('link', { name: 'EDR' });
-      await screen.findByRole('link', { name: 'OGC Maps' });
+      await screen.findByRole('link', { name: 'OGC API - EDR' });
+      await screen.findByRole('link', { name: 'OGC API - Maps' });
     }],
     [`/record/${encodeURIComponent(REC)}/edr?col=${encodeURIComponent(COL_EDR)}`, 'page-edr', async () => {
       await screen.findByRole('heading', { name: 'Operational data' });

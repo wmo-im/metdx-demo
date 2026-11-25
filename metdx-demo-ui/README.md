@@ -1,7 +1,7 @@
 # metdx-demo-ui
 
 A browser UI for the metdx demo, styled after [ogcbrowser.rauhala.app](https://ogcbrowser.rauhala.app/)
-(left sidebar, map in the centre, request bar at the bottom). Flow: catalogue search -> record page -> EDR
+(left sidebar, map in the centre, request bar at the bottom). Flow: catalogue search -> record page -> OGC API - EDR
 query builder or Maps view. It searches the live WMO resource catalogue
 (<https://wmo-resource-catalogue.labs.wis2dev.io/collections/wis2-discovery-metadata>).
 
@@ -34,12 +34,12 @@ forces it on.
 By default the catalogue page searches the **live WMO resource catalogue** (`catalogueUrl`, through the proxy;
 the source chip shows its host). The search box is prefilled with `defaultQuery` (default `metdx-demo`, which
 returns the demo records) when the page is opened without `?q=`; clear it and search to list all records.
-Records whose EDR / OGC Maps collections cannot be fetched (e.g. a 502 from the upstream server) just show no badges.
+Records whose OGC API - EDR / OGC API - Maps collections cannot be fetched (e.g. a 502 from the upstream server) just show no badges.
 
 Offline / mock alternative: `recordsSource: "local"` (or `?records=local`) searches the **records bundled with the
 app** (`src/data/records/*.json`) in the browser instead (case-insensitive; every word must occur in the title,
 description or keywords; empty = list all), 10 results per page, and a record page opens by id from the same set.
-EDR and OGC Maps calls are not affected: they still go live through the proxy (unless `?mock=1`). The chip then
+OGC API - EDR and OGC API - Maps calls are not affected: they still go live through the proxy (unless `?mock=1`). The chip then
 reads "local records".
 
 The bundled records are copies of `../resources/metadata/discovery/*.json`; `test/fixtures/records/` is another copy
@@ -55,7 +55,7 @@ Switch with `recordsSource` in `config.json` or `?records=catalogue|local` (see 
 ## Tests
 
 ```sh
-npm test                      # vitest (unit + component tests), non-watch; the large EDR page tests are split over
+npm test                      # vitest (unit + component tests), non-watch; the large OGC API - EDR page tests are split over
                               # src/pages/edr/index*.test.tsx (shared harness: test/edrPageHarness.tsx) so they run in parallel
 npm --prefix server ci && npm --prefix server test   # proxy server tests (node:test)
 node --test scripts/e2e-fingerprint.test.mjs         # e2e build fingerprint tests (node:test)
@@ -73,8 +73,8 @@ npm run e2e:leaflet   # both engines, everything, against a separate Leaflet-ena
 npm run e2e:live      # real ECMWF/DestinE requests (opt-in)
 ```
 
-- **Quick set**: tests tagged `@quick` (`QUICK` in `test/e2e/engine.ts`): search -> record -> EDR point fetch with chart,
-  area contours drawn + toggle to points, free polygon draw, OGC Maps overlay, no Leaflet code / "Code on GitHub" link in
+- **Quick set**: tests tagged `@quick` (`QUICK` in `test/e2e/engine.ts`): search -> record -> OGC API - EDR point fetch with chart,
+  area contours drawn + toggle to points, free polygon draw, OGC API - Maps overlay, no Leaflet code / "Code on GitHub" link in
   the default build. Tag a test with `test('...', { tag: QUICK }, async ...)` to add it. CI runs only `npm test`.
 - **No network**: basemap tiles (`tile.openstreetmap.org`) are answered with one local 256x256 PNG
   (`test/fixtures/basemap-tile.png`, made by `scripts/make-stub-tile.mjs`; routed in `test/e2e/engine.ts`). The
@@ -117,7 +117,7 @@ Server environment variables (see `server/src/proxy.js`):
 
 All other hosts, and any host resolving to a private, loopback or link-local address (also for redirect
 targets), are rejected with 403. Redirects are not followed: a 3xx is returned as HTTP 200 JSON
-`{status, location}` so the client can poll EDR jobs.
+`{status, location}` so the client can poll OGC API - EDR jobs.
 
 Runtime app config, `public/config.json` (copied to `dist/config.json`, read by the browser at startup, so it can
 be edited in a deployed build or image without rebuilding; a missing or invalid file means the defaults):
@@ -181,7 +181,7 @@ GitHub Pages is static hosting, so `npm run build:pages` differs from the normal
 - hash routing (`VITE_ROUTER=hash`): URLs look like `.../metdx-demo-ui/#/record/...`, so a reload never 404s.
   Query parameters such as `?records=local` or `?mock=1` go before the `#`: `.../metdx-demo-ui/?records=local`;
 - `"proxy": false` in `dist/config.json`: there is no proxy on Pages, so the browser calls the WMO resource catalogue and the
-  EDR / OGC Maps server directly. This works because those servers answer with `Access-Control-Allow-Origin` for
+  OGC API - EDR / OGC API - Maps server directly. This works because those servers answer with `Access-Control-Allow-Origin` for
   the `github.io` origin (including the Maps PNG, which the app fetches as a blob). If a server stops sending CORS headers, requests fail in the browser with a
   network error.
 

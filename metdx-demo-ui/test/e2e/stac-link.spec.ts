@@ -1,6 +1,6 @@
 // A WCMP2 record that also links a STAC Collection (rel=collection, application/json): the catalogue is routed to serve
 // the ECMWF record with those links added, the polytope collections come from the fixtures and the STAC host answers
-// (or fails). The record page must still enable EDR / OGC Maps and list both links. Offline; the ECMWF STAC catalogue is
+// (or fails). The record page must still enable EDR / OGC API - Maps and list both links. Offline; the ECMWF STAC catalogue is
 // not reachable through the app's proxy in the Docker deployment unless its host is allow-listed, which this test does not cover.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -29,7 +29,7 @@ function modifiedRecord(where: 'first' | 'last') {
 
 for (const where of ['first', 'last'] as const) {
   for (const stac of ['ok', '403'] as const) {
-    test(`STAC collection link ${where}, STAC host ${stac}: EDR and OGC Maps stay enabled, both links listed`, async ({ page }) => {
+    test(`STAC collection link ${where}, STAC host ${stac}: OGC API - EDR and OGC API - Maps stay enabled, both links listed`, async ({ page }) => {
       const record = modifiedRecord(where);
       const stacCalls: string[] = [];
       await page.route('**/api/proxy**', (route) => {
@@ -56,8 +56,8 @@ for (const where of ['first', 'last'] as const) {
       await page.getByTestId('result-card').filter({ hasText: RECORD_TITLE }).click();
       await expect(page.getByRole('heading', { name: RECORD_TITLE })).toBeVisible();
 
-      const edr = page.getByRole('link', { name: 'EDR', exact: true });
-      const maps = page.getByRole('link', { name: 'OGC Maps', exact: true });
+      const edr = page.getByRole('link', { name: 'OGC API - EDR', exact: true });
+      const maps = page.getByRole('link', { name: 'OGC API - Maps', exact: true });
       await expect(edr).toBeEnabled();
       await expect(maps).toBeEnabled();
       expect(decodeURIComponent((await edr.getAttribute('href')) ?? '')).toContain(

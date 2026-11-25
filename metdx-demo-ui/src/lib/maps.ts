@@ -1,5 +1,5 @@
 /**
- * OGC Maps helpers: map-link discovery, schema parsing and the request URL
+ * OGC API - Maps helpers: map-link discovery, schema parsing and the request URL
  * builder. The URL format mirrors the Flet app (`views/ogc_map.py`
  * `build_url`): `{map}?f=png&bbox=..&width=..&height=..&datetime=..&parameter-name=..&subset=z(..)`.
  * Values are emitted verbatim (not percent-encoded), exactly like Flet.

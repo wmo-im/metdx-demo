@@ -452,7 +452,7 @@ function addMonths(ms: number, months: number): number {
 }
 
 /**
- * The instants a temporal `values` list (OGC EDR) offers. Each entry is an ISO instant or a
+ * The instants a temporal `values` list (OGC API - EDR) offers. Each entry is an ISO instant or a
  * `start/end/period` interval (`PT1H`, `PT30M`, `P1D`, `P1DT6H`, ...); other entries are ignored.
  * Capped at {@link MAX_TEMPORAL_VALUES}.
  */
