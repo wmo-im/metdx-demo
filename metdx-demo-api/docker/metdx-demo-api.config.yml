@@ -100,6 +100,51 @@ resources:
 #                    name: png
 #                    mimetype: image/png
 
+    msc-weather-forecast:
+        type: collection
+        title: Canadian weather forecast [experimental]
+        description: "The Weather Point Forecast provides icons and weather information generated from Canadian numerical weather prediction models, such as probability of precipitation, precipitation type, temperature, feels-like temperature, visibility, wind speed, UV index, and sky condition. This data is produced at various temporal scales to meet public needs by offering users detailed forecasts as hourly, daily, and 7-day outlooks for all locations across Canada."
+        keywords:
+            - MetIcons
+            - Point forecast
+            - WEonG
+        extents:
+            spatial:
+                bbox: [-141.0, 41.7, -52.6, 83.1]
+                crs: http://www.opengis.net/def/crs/EPSG/0/4326
+            temporal:
+              begin: 2026-01-01T00:00:00Z
+              end: null
+        links:
+            - type: text/html
+              rel: describedby
+              title: Dataset description (WIS2 Global Discovery Catalogue)
+              href: https://wmo-resource-catalogue.labs.wis2dev.io/collections/wis2-discovery-metadata/items/urn:wmo:md:ca-eccc-msc:msc-weather-forecast
+              hreflang: en-CA
+        providers:
+            - type: edr
+              name: pygeoapi.provider.msc_vof.MSCVOFEDRProvider
+              data: /home/wis2/data/20261124T05Z_MSC_VOF_AllVar-WINGS_Sfc_RLatLon0.02.zarr
+              x_field: rlon
+              y_field: rlat
+              time_field: time
+              format:
+                  name: zarr
+                  mimetype: application/zip
+            - type: map 
+              name: pygeoapi.provider.msc_vof.MSCVOFMapProvider
+              data: /home/wis2/data/20261124T05Z_MSC_VOF_AllVar-WINGS_Sfc_RLatLon0.02.zarr
+              x_field: rlon
+              y_field: rlat
+              time_field: time
+              options:
+                  #consolidated: true
+                  squeeze: true
+                  coastlines: false
+              format:
+                    name: png 
+                    mimetype: image/png
+
     ChartProcessor:
         type: process
         processor:

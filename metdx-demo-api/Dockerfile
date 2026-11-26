@@ -27,7 +27,10 @@ ENV PYGEOAPI_CONFIG=/pygeoapi/local.config.yml
 ENV PYGEOAPI_OPENAPI=/pygeoapi/local.openapi.yml
 
 COPY ./docker/metdx-demo-api.config.yml /pygeoapi/local.config.yml
+COPY ./docker/pygeoapi_xarray_.py /pygeoapi/pygeoapi/provider/xarray_.py
+COPY ./docker/pygeoapi_xarray_edr.py /pygeoapi/pygeoapi/provider/xarray_edr.py
 COPY ./plugins/processes/chart_generator.py /pygeoapi/pygeoapi/process/chart_generator.py
+COPY ./plugins/providers/msc_vof.py /pygeoapi/pygeoapi/provider/msc_vof.py
 
 RUN apt-get update && \
     apt-get install -y python3-matplotlib && \
